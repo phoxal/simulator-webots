@@ -51,12 +51,12 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # above, and leaving them on the published train would resolve two halves of one
 # train against each other.
 [patch.crates-io]
-phoxal-bus = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/bus" }
-phoxal-protocol = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/protocol" }
-phoxal-model = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/model" }
-phoxal-bundle = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/bundle" }
-phoxal-runtime-contract = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/runtime-contract" }
-phoxal-macros = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/macros" }
+phoxal-bus = { path = "../framework/.claude/worktrees/one-bundle/crates/bus" }
+phoxal-protocol = { path = "../framework/.claude/worktrees/one-bundle/crates/protocol" }
+phoxal-model = { path = "../framework/.claude/worktrees/one-bundle/crates/model" }
+phoxal-bundle = { path = "../framework/.claude/worktrees/one-bundle/crates/bundle" }
+phoxal-runtime-contract = { path = "../framework/.claude/worktrees/one-bundle/crates/runtime-contract" }
+phoxal-macros = { path = "../framework/.claude/worktrees/one-bundle/crates/macros" }
 
 [lints.rust]
 unused = "warn"
