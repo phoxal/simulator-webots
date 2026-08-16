@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.63.0](https://github.com/phoxal/simulator-webots/compare/v0.1.0...v0.63.0) - 2026-08-16
+## [0.63.0](https://github.com/phoxal/simulator-webots/releases/tag/v0.63.0) - 2026-08-16
+
+The first standalone release. There is no earlier tag in this repository to
+compare against: the controller lived in `phoxal/framework` until this train,
+and the version continues the line its package name already published there.
 
 ### Added
 
