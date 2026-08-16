@@ -1,0 +1,38 @@
+# release-plz owns this repository's one package version.
+#
+# There is a single publication channel: the executable goes to the static
+# `phoxal` registry, added by the release workflow with `cargo package` +
+# `margo add`. Nothing here reaches crates.io - this package is a binary, and a
+# binary has no library surface for a crates.io consumer to depend on.
+
+[workspace]
+release_always = true
+dependencies_update = false
+pr_name = "chore(release): release v{{ version }}"
+
+# cargo-semver-checks compares a library against its own published version.
+# This package is bin-only, so there is no library surface to compare and the
+# check has nothing to say. Wire compatibility is the framework train's
+# promise, not this controller's: it declares no contracts of its own.
+semver_check = false
+
+[[package]]
+name = "phoxal-simulator-webots-controller"
+
+# `publish = false` suppresses release-plz's `cargo publish` step only; the
+# package still participates in change detection and version bumping. Do NOT
+# use `release = false` - that drops the package from processing entirely and
+# silently restores the "an executable change cuts no release" defect.
+#
+# Cargo-side `publish = ["phoxal"]` in Cargo.toml is the second, independent
+# guard: an ordinary `cargo publish` cannot reach crates.io by accident.
+publish = false
+
+# The tag is this repository's only marker of what a version contained: there
+# is no crates.io record and no GitHub release. The release workflow creates it
+# after the registry push has actually landed, because a tag pointing at a
+# version the registry never received would strand the next resume; this
+# declares the name that tag carries.
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = false

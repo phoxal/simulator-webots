@@ -1,0 +1,74 @@
+[package]
+name = "phoxal-simulator-webots-controller"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+# Executables reach robots through the static `phoxal` registry, never
+# crates.io. Declaring the allowed registry in the manifest is the second,
+# independent guard: a plain `cargo publish` cannot reach crates.io by accident.
+publish = ["phoxal"]
+description = "Phoxal official simulator: Webots per-robot component-capability controller."
+documentation = "https://github.com/phoxal/simulator-webots#readme"
+homepage = "https://github.com/phoxal/simulator-webots"
+repository = "https://github.com/phoxal/simulator-webots"
+
+[[bin]]
+name = "phoxal-simulator-webots-controller"
+path = "src/main.rs"
+
+[dependencies]
+# The controller is a plain bus client, not a participant: it depends on the
+# transport, the contract catalogue, the robot model and the bundle reader, and
+# deliberately not on the `phoxal` facade, whose runner, roles and setup context
+# describe a supervised participant this process is not.
+#
+# `phoxal-runtime-contract` is deliberately absent: the runtime identities this
+# binary names (`ParticipantId`, `ExecutionId`, `TimelineId`) appear in
+# `phoxal-bus`'s own signatures and are re-exported from it, so naming the
+# owning crate a second time would add a direct dependency that buys nothing.
+phoxal-bus = "=0.62.1"
+phoxal-protocol = "=0.62.1"
+phoxal-model = "=0.62.1"
+phoxal-bundle = "=0.62.1"
+webots-rs = "0.2"
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "signal", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# DEVELOPMENT OVERLAY - REMOVE BEFORE OPENING THE PULL REQUEST.
+#
+# The controller is built against the in-flight framework train, whose bus,
+# protocol, model and bundle crates carry the one-bundle API this binary needs
+# and which no published version has yet. Point every framework crate at the
+# campaign worktree until that train is released, then delete this section and
+# raise the version requirements above to the released train.
+#
+# `phoxal-runtime-contract` and `phoxal-macros` are patched even though this
+# package names neither: they are transitive dependencies of the four crates
+# above, and leaving them on the published train would resolve two halves of one
+# train against each other.
+[patch.crates-io]
+phoxal-bus = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/bus" }
+phoxal-protocol = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/protocol" }
+phoxal-model = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/model" }
+phoxal-bundle = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/bundle" }
+phoxal-runtime-contract = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/runtime-contract" }
+phoxal-macros = { path = "../framework/.claude/worktrees/one-bundle-fc/crates/macros" }
+
+[lints.rust]
+unused = "warn"
+
+# The panic and stub rules, enforced rather than reviewed.
+#
+# This binary drives a simulated robot for as long as the world runs: a panic
+# takes the whole simulation down mid-step and leaves the motors wherever they
+# were, so a failure a caller could act on must be a typed error and not an
+# `.unwrap()`. Tests are exempt through `clippy.toml`.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"

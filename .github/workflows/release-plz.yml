@@ -1,0 +1,342 @@
+name: release-plz
+
+# Publishing this controller is one ordinary publication: `cargo package` puts
+# the source in a `.crate`, and `margo add` appends it to the static `phoxal`
+# registry, which GitHub Pages then serves. Robots compile the source
+# themselves, so there is no cross-target build matrix and no per-target
+# archive.
+#
+# There is deliberately no crates.io leg: this package is bin-only, and a binary
+# has no library surface for a crates.io consumer to depend on. There is also no
+# contract-compatibility gate: this controller declares no wire contracts of its
+# own - it speaks the framework train's, and that train's own release gates it.
+#
+# `registries.phoxal.index` comes from the committed `.cargo/config.toml`, so
+# every cargo and release-plz invocation here picks it up - including the shared
+# reusable release-PR workflow, which does not inherit this workflow's env.
+# Without it release-plz does not degrade, it aborts.
+#
+# REQUIRED SECRETS: `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`, the GitHub
+# App credentials that let this repository push to `phoxal/registry`. They may be
+# granted at the organization level or on this repository; without them the
+# registry job cannot mint its token and the publication fails at that step.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Re-run an unpublished prepared release from main
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: simulator-webots-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: identify the publication
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Identify the publication
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PUBLISH: ${{ inputs.publish }}
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "phoxal-simulator-webots-controller") | .version')"
+          tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          subject="$(git log -1 --pretty=%s)"
+          if [[ "$EVENT_NAME" == "push" && "$subject" == "chore(release): release v"* ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$DISPATCH_PUBLISH" == "true" ]]; then
+            [[ "$DISPATCH_REF" == "refs/heads/main" ]] || {
+              echo "manual publication must run from main" >&2
+              exit 1
+            }
+            release_subject="chore(release): release $tag"
+            release_commit="$(git log -1 --format=%H --fixed-strings --grep="$release_subject")"
+            [[ -n "$release_commit" ]] || {
+              echo "manual publication requires an exact $release_subject ancestor" >&2
+              exit 1
+            }
+            git merge-base --is-ancestor "$release_commit" HEAD || {
+              echo "prepared release commit $release_commit is not an ancestor of main" >&2
+              exit 1
+            }
+            # Package inputs changed after the release commit would be published
+            # under a version that does not describe them. Markdown is NOT
+            # excluded - README.md and CHANGELOG.md are inside the packaged
+            # crate, so editing them changes crate bytes.
+            git diff --quiet "$release_commit"..HEAD -- ':!.github' || {
+              echo "package inputs changed after $release_subject; prepare a new release" >&2
+              exit 1
+            }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-registry:
+    name: publish the controller to the phoxal registry
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      PHOXAL_REGISTRY: phoxal
+      # Pinned: this registry's margo-config.toml was written by 0.1.7.
+      MARGO_VERSION: "0.1.7"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      # The checked-out source must actually BE this version. A source that
+      # declares no package for the `phoxal` registry cannot be this release.
+      - name: Verify the checked-out source is this version
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrong=0
+          found=0
+          while read -r package version; do
+            found=$((found + 1))
+            if [[ "$version" != "$VERSION" ]]; then
+              echo "::error::${package} is ${version} in this source, not ${VERSION}"
+              wrong=1
+            fi
+          done < <(
+            cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.publish == ["phoxal"]) | "\(.name) \(.version)"'
+          )
+          if [[ "$found" == "0" ]]; then
+            echo "::error::This source declares no packages for the ${PHOXAL_REGISTRY} registry."
+            exit 1
+          fi
+          [[ "$wrong" == "0" ]] || exit 1
+          echo "all ${found} package(s) are ${VERSION}"
+
+      # `--no-verify` because verification would build the package, and building
+      # it links Webots' libController: installing Webots to prove a bin-only
+      # crate compiles is several hundred megabytes for a check CI already
+      # performs on every pull request. What is given up is narrow - that this
+      # specific `.crate` is self-contained - and the package has sources only,
+      # no assets or generated files to omit.
+      - name: Package the controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo package -p phoxal-simulator-webots-controller --no-verify
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: phoxal
+          repositories: registry
+
+      - name: Check out the registry
+        uses: actions/checkout@v6
+        with:
+          repository: phoxal/registry
+          token: ${{ steps.app-token.outputs.token }}
+          path: registry
+          # The registry's own append-only validator walks base..head, so this
+          # checkout needs real history.
+          fetch-depth: 0
+
+      # Immutability is the registry's whole contract, so drop anything already
+      # published rather than asking margo to overwrite it. A partly-published
+      # release then resumes cleanly instead of failing.
+      - name: Drop an already-published version
+        shell: bash
+        run: |
+          set -euo pipefail
+          skipped=0
+          # margo stores an artifact as crates/<prefix>/<prefix>/<name>/<version>.crate,
+          # so the published file is named for the VERSION, not the package. Glob
+          # the prefix directories rather than reimplementing Cargo's prefix rule.
+          while read -r package version; do
+            local_crate="target/package/${package}-${version}.crate"
+            [[ -f "$local_crate" ]] || { echo "::error::expected $local_crate"; exit 1; }
+            published=""
+            for candidate in registry/crates/*/*/"$package"/"$version".crate; do
+              [[ -f "$candidate" ]] && { published="$candidate"; break; }
+            done
+            [[ -n "$published" ]] || continue
+
+            # Same version already in the registry. Resume only if it is the
+            # same artifact: identical content means an earlier run of THIS
+            # release got that far. Different content means the version would
+            # have to change to describe this build, and versions are
+            # immutable - so stop rather than publish a contradiction.
+            if [[ "$(sha256sum < "$local_crate")" == "$(sha256sum < "$published")" ]]; then
+              echo "  already published, skipping: ${package} ${version}"
+              rm "$local_crate"
+              skipped=$((skipped + 1))
+            else
+              echo "::error::${package} ${version} is already published with different content."
+              echo "::error::Published versions are immutable; cut a new patch release instead."
+              exit 1
+            fi
+          done < <(
+            cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.publish == ["phoxal"]) | "\(.name) \(.version)"'
+          )
+          remaining=$(find target/package -maxdepth 1 -name '*.crate' | wc -l | tr -d ' ')
+          echo "publishing $remaining package(s), skipped $skipped already-published"
+          echo "REMAINING=$remaining" >> "$GITHUB_ENV"
+
+      # margo is called directly rather than through `integer32llc/margo-actions`.
+      # The action looked like the obvious choice, but at its only pinnable ref
+      # its input is `registry-dir`, not the `registry` its README documents -
+      # and an unknown input is silently ignored, so it published into `.` and
+      # failed on a missing margo-config.toml. It also pins margo 0.1.3
+      # internally, while this registry was created by 0.1.7. Two behaviours we
+      # do not control, in exchange for a download and a loop.
+      - name: Install margo
+        if: env.REMAINING != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location \
+            "https://github.com/integer32llc/margo/releases/download/${MARGO_VERSION}/margo-linux-x86_64.tar.gz" \
+            --output "$RUNNER_TEMP/margo.tar.gz"
+          tar -xzf "$RUNNER_TEMP/margo.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/margo" --help >/dev/null 2>&1 || true
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Add the package to the registry
+        if: env.REMAINING != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          added=0
+          for crate in target/package/*.crate; do
+            margo add --registry registry "$crate"
+            added=$((added + 1))
+          done
+          echo "added $added package(s) to the registry"
+          [[ "$added" == "$REMAINING" ]] || {
+            echo "::error::added $added but expected $REMAINING"
+            exit 1
+          }
+
+      - name: Commit the registry
+        if: env.REMAINING != '0'
+        working-directory: registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "phoxal-release-bot"
+          git config user.email "release-bot@phoxal.com"
+          echo "BASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git add -A
+          git commit -m "publish phoxal-simulator-webots-controller v${VERSION}"
+
+      # Everything below runs BEFORE the push. The registry's immutability
+      # workflow only triggers afterwards, and a malformed append would already
+      # be permanent by then - so the same validator runs here, on the commit
+      # that is about to be pushed, while it can still be thrown away.
+      - name: Verify the append is valid before pushing
+        if: env.REMAINING != '0'
+        working-directory: registry
+        shell: bash
+        run: python3 .github/scripts/check_append_only.py "$BASE" HEAD
+
+      - name: Verify the packaged version is in the index
+        if: env.REMAINING != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          while read -r package version; do
+            artifact=""
+            for candidate in registry/crates/*/*/"$package"/"$version".crate; do
+              [[ -f "$candidate" ]] && { artifact="$candidate"; break; }
+            done
+            if [[ -z "$artifact" ]]; then
+              echo "::error::${package} ${version} is not in the registry after margo ran"
+              missing=1
+              continue
+            fi
+            index_file="$(find registry -mindepth 3 -maxdepth 3 -type f -name "$package" \
+              -not -path 'registry/crates/*' -not -path 'registry/.git*' | head -1)"
+            if [[ -z "$index_file" ]]; then
+              echo "::error::${package} has no index file"
+              missing=1
+              continue
+            fi
+            expected="$(sha256sum "$artifact" | cut -d' ' -f1)"
+            jq -e --arg v "$version" --arg c "$expected" \
+              'select(.vers == $v and .cksum == $c)' "$index_file" >/dev/null || {
+                echo "::error::${package} ${version} index record missing or checksum mismatch"
+                missing=1
+              }
+          done < <(
+            cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.publish == ["phoxal"]) | "\(.name) \(.version)"'
+          )
+          [[ "$missing" == "0" ]] || exit 1
+          echo "every packaged version has a matching index record"
+
+      - name: Deploy the registry
+        if: env.REMAINING != '0'
+        working-directory: registry
+        shell: bash
+        run: git push origin main
+
+      # Last, deliberately: the tag is this repository's only record of what a
+      # version contained - there is no crates.io entry and no GitHub release -
+      # and until the registry has landed there is nothing for it to describe.
+      # Tagging early would strand a later resume. Created here rather than by
+      # `release-plz release` because there is no crates.io publication for
+      # release-plz to hang a tag on; `release-plz.toml` still declares the name
+      # this tag carries.
+      - name: Tag the published version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG already exists"
+            exit 0
+          fi
+          git config user.name "phoxal-release-bot"
+          git config user.email "release-bot@phoxal.com"
+          git tag -a "$TAG" -m "phoxal-simulator-webots-controller $TAG"
+          git push origin "$TAG"
+          echo "created $TAG"
+
+  release-plz-pr:
+    name: prepare the release PR
+    needs: prepare
+    if: needs.prepare.outputs.publish != 'true'
+    uses: phoxal/.github/.github/workflows/rust-release-plz-pr.yml@main
+    secrets: inherit

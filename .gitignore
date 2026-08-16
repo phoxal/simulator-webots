@@ -1,0 +1,8 @@
+target/
+.idea
+.env
+*.lock~
+.claude/worktrees
+.aider*
+
+.DS_Store
