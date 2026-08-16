@@ -27,36 +27,16 @@ path = "src/main.rs"
 # binary names (`ParticipantId`, `ExecutionId`, `TimelineId`) appear in
 # `phoxal-bus`'s own signatures and are re-exported from it, so naming the
 # owning crate a second time would add a direct dependency that buys nothing.
-phoxal-bus = "=0.62.1"
-phoxal-protocol = "=0.62.1"
-phoxal-model = "=0.62.1"
-phoxal-bundle = "=0.62.1"
+phoxal-bus = "0.63"
+phoxal-protocol = "0.63"
+phoxal-model = "0.63"
+phoxal-bundle = "0.63"
 webots-rs = "0.2"
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "signal", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-
-# DEVELOPMENT OVERLAY - REMOVE BEFORE OPENING THE PULL REQUEST.
-#
-# The controller is built against the in-flight framework train, whose bus,
-# protocol, model and bundle crates carry the one-bundle API this binary needs
-# and which no published version has yet. Point every framework crate at the
-# campaign worktree until that train is released, then delete this section and
-# raise the version requirements above to the released train.
-#
-# `phoxal-runtime-contract` and `phoxal-macros` are patched even though this
-# package names neither: they are transitive dependencies of the four crates
-# above, and leaving them on the published train would resolve two halves of one
-# train against each other.
-[patch.crates-io]
-phoxal-bus = { path = "../framework/.claude/worktrees/one-bundle/crates/bus" }
-phoxal-protocol = { path = "../framework/.claude/worktrees/one-bundle/crates/protocol" }
-phoxal-model = { path = "../framework/.claude/worktrees/one-bundle/crates/model" }
-phoxal-bundle = { path = "../framework/.claude/worktrees/one-bundle/crates/bundle" }
-phoxal-runtime-contract = { path = "../framework/.claude/worktrees/one-bundle/crates/runtime-contract" }
-phoxal-macros = { path = "../framework/.claude/worktrees/one-bundle/crates/macros" }
 
 [lints.rust]
 unused = "warn"
