@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# webots-rs links Webots' libController at build time, so this package cannot
+# even be `cargo check`ed without a real Webots installation - build scripts run
+# on check. The reusable workflow installs Webots and exports WEBOTS_HOME before
+# the clippy and test jobs build.
+jobs:
+  ci:
+    if: >-
+      github.event_name != 'push' ||
+      !startsWith(github.event.head_commit.message, 'chore(release): release v')
+    uses: phoxal/.github/.github/workflows/rust-ci.yml@main
+    with:
+      webots-version: R2025a
+    secrets: inherit

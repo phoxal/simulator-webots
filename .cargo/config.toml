@@ -1,0 +1,25 @@
+# The static registry this package publishes to.
+#
+# Committed rather than passed per invocation because everything that touches
+# this repository needs it: release-plz aborts outright without it ("registry
+# index was not found in any configuration"), including inside the shared
+# reusable release-PR workflow, which does not inherit the caller's environment.
+[registries.phoxal]
+index = "sparse+https://phoxal.github.io/registry/"
+
+# Warnings are errors, here as well as in CI.
+#
+# CI denies them twice over: the clippy job passes `-D warnings`, and
+# `actions-rust-lang/setup-rust-toolchain` exports `RUSTFLAGS=-D warnings` for
+# every job it sets up, which is what makes the *test* job fail on a lint too.
+# Without this, a plain local `cargo build`/`test` treats those same lints as
+# warnings and scrolls them past, so the first thing that fails on them is a red
+# pull request. Some lints are only ever reported at build time - an unfulfilled
+# `#[expect(...)]` among them - so this is the only way a local run can see them.
+#
+# Registry dependencies are unaffected: cargo builds them with `--cap-lints
+# allow`, so this reaches this package's own code only. Setting `RUSTFLAGS` in
+# the environment overrides this table wholesale, which is the escape hatch for a
+# one-off build that needs to tolerate a warning.
+[build]
+rustflags = ["-D", "warnings"]
