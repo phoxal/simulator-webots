@@ -96,17 +96,12 @@ async fn main() -> ExitCode {
 }
 
 fn init_tracing() {
-    // `phoxal.lease` traces every fixed-source authority decision at INFO, one
-    // line per motor command per motor - around ninety lines a second on a
-    // four-wheel rover at 25 Hz, which buries everything else this process
-    // says. The decisions still matter when a motor is not moving, so they are
-    // kept and lowered rather than dropped: raise them back with
-    // `RUST_LOG=info,phoxal.lease=info`.
-    //
-    // Delete this special case once the bus emits those traces at `debug!`; the
-    // default then becomes a plain `info`.
+    // The same defaults as the supervisor: `RUST_LOG` decides, otherwise this
+    // process at `info` and the transport at `warn`. `zenoh_link_unixsock_stream`
+    // warns on every successful client connect over a Unix socket (the client
+    // side has no named local address), so it is held to errors.
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,phoxal.lease=warn"));
+        .unwrap_or_else(|_| EnvFilter::new("info,zenoh=warn,zenoh_link_unixsock_stream=error"));
     // Webots pipes a controller's stderr into its console when it launches one,
     // and that pipe renders no escape codes; a controller started by hand at a
     // terminal gets colour.

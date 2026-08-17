@@ -32,10 +32,10 @@ path = "src/main.rs"
 # binary names (`ParticipantId`, `ExecutionId`, `TimelineId`) appear in
 # `phoxal-bus`'s own signatures and are re-exported from it, so naming the
 # owning crate a second time would add a direct dependency that buys nothing.
-phoxal-bus = "0.63"
-phoxal-protocol = "0.63"
-phoxal-model = "0.63"
-phoxal-bundle = "0.63"
+phoxal-bus = "0.65"
+phoxal-protocol = "0.65"
+phoxal-model = "0.65"
+phoxal-bundle = "0.65"
 webots-rs = "0.2"
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }

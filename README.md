@@ -73,10 +73,11 @@ Webots also stops it with `SIGTERM`; on that signal - or `SIGINT` - the
 controller parks the world, drops its presence tokens, closes the bus session,
 and exits 0.
 
-Logging goes to stderr, which Webots collects into its console.
-`RUST_LOG` sets the filter; the default is `info,phoxal.lease=warn`, because the
-bus lease traces one line per motor command per motor and would otherwise bury
-everything else. Raise them with `RUST_LOG=info,phoxal.lease=info`.
+Logging goes to stderr, which Webots collects into its console (the CLI routes
+it into the session's Webots log). `RUST_LOG` sets the filter; the default is
+`info,zenoh=warn,zenoh_link_unixsock_stream=error`, the same as the supervisor.
+The controller is an external entity: it never publishes to the supervisor's
+log stream.
 
 ## Building it
 
