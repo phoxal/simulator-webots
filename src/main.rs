@@ -101,6 +101,9 @@ fn init_tracing() {
     // says. The decisions still matter when a motor is not moving, so they are
     // kept and lowered rather than dropped: raise them back with
     // `RUST_LOG=info,phoxal.lease=info`.
+    //
+    // Delete this special case once the bus emits those traces at `debug!`; the
+    // default then becomes a plain `info`.
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,phoxal.lease=warn"));
     // Webots pipes a controller's stderr into its console when it launches one,

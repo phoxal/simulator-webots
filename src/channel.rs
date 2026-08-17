@@ -9,9 +9,9 @@
 
 use anyhow::Result;
 use phoxal_bus::{
-    BusHandle, CaptureStamp, EndpointDescriptor, FixedSourceLease, LocalInstant, Observed,
-    ParticipantId, ParticipantReadyEvents, Payload, SampleContract, SamplePublisher,
-    SetpointDeliveryContract, SetpointReceiver, StatePublisher, StepStamp, WorldStepToken,
+    BusHandle, CaptureStamp, FixedSourceLease, LocalInstant, Observed, ParticipantId,
+    ParticipantReadyEvents, SampleContract, SamplePublisher, SetpointReceiver, StatePublisher,
+    StepStamp, WorldStepToken,
 };
 use phoxal_model::identity::CapabilityRef;
 use phoxal_protocol::robot as api;
@@ -42,63 +42,6 @@ const MOTOR_SOURCE_SILENCE: Duration = Duration::from_millis(150);
 /// anything this binary invents: leaving the facade behind changed how the
 /// receiver is built, not who may drive the wheels.
 const MOTOR_COMMAND_AUTHORITY: &str = "drive";
-
-/// Reading a subscriber's backlog the way one world step needs it.
-///
-/// An actuator offers every pending setpoint to its fixed-source authority
-/// before deciding which held command to apply.  Coalescing before authority
-/// would let a later packet from an unauthorised producer erase Drive's
-/// already-pending intent.
-trait CommandBacklog<B: Payload, E: EndpointDescriptor<Payload = B>> {
-    /// Every queued value, in receiver order, including trusted transport
-    /// provenance for fixed-source authority admission.
-    fn take_all_observed(&self) -> Result<Vec<Observed<B>>>;
-}
-
-impl<B: Payload, E: SetpointDeliveryContract<Payload = B>> CommandBacklog<B, E>
-    for SetpointReceiver<E>
-{
-    fn take_all_observed(&self) -> Result<Vec<Observed<B>>> {
-        let mut pending = Vec::new();
-        while let Some(observed) = self.try_recv() {
-            pending.push(observed);
-        }
-        Ok(pending)
-    }
-}
-
-/// A Webots device the graph drives.
-trait SimulatedActuator {
-    /// The endpoint payload this device is commanded with.
-    type Command: Payload + Clone;
-
-    /// The command receiver bound to this actuator.
-    type Endpoint: SetpointDeliveryContract<Payload = Self::Command>;
-    type Receiver: CommandBacklog<Self::Command, Self::Endpoint>;
-
-    /// Apply one already-admitted command body.
-    fn apply_body(&mut self, command: Self::Command) -> Result<()>;
-
-    /// Leave the device quiet: a simulation that stopped must not keep driving
-    /// or keep playing. A device with nothing to quiet keeps the default.
-    fn park(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl SimulatedActuator for NativeMotor {
-    type Command = api::component::motor::Command;
-    type Endpoint = api::endpoint::component::motor::CommandEndpoint;
-    type Receiver = SetpointReceiver<Self::Endpoint>;
-
-    fn apply_body(&mut self, command: Self::Command) -> Result<()> {
-        self.apply(&command)
-    }
-
-    fn park(&mut self) -> Result<()> {
-        self.apply(&api::component::motor::Command::Stop)
-    }
-}
 
 /// A sensor device and the measurement handle it publishes on.
 struct SensorChannel<S: SimulatedSensor>
@@ -136,15 +79,35 @@ where
     }
 }
 
-/// An actuator device and the subscriber carrying what the graph asked of it.
-struct ActuatorChannel<A: SimulatedActuator> {
-    device: A,
-    commands: A::Receiver,
-    authority: FixedSourceLease<A::Command>,
+/// The motor device, the setpoints the graph sent it, and the authority that
+/// decides which of them may be applied.
+///
+/// The motor is the only device the graph drives: LED and speaker effects are
+/// refused at startup for want of a declared command authority, and Webots
+/// models no emergency-stop control at all. One concrete channel therefore says
+/// exactly what happens on a step, instead of a family-generic actuator with a
+/// single implementation.
+struct MotorChannel {
+    device: NativeMotor,
+    commands: SetpointReceiver<api::endpoint::component::motor::CommandEndpoint>,
+    authority: FixedSourceLease<api::component::motor::Command>,
     ready: ParticipantReadyEvents,
 }
 
-impl<A: SimulatedActuator> ActuatorChannel<A> {
+impl MotorChannel {
+    /// Every queued setpoint, in receiver order, carrying the trusted transport
+    /// provenance fixed-source admission needs.
+    ///
+    /// Draining cannot fail: `try_recv` either yields a value or reports the
+    /// queue empty.
+    fn drain_commands(&self) -> Vec<Observed<api::component::motor::Command>> {
+        let mut pending = Vec::new();
+        while let Some(observed) = self.commands.try_recv() {
+            pending.push(observed);
+        }
+        pending
+    }
+
     fn apply_backlog(&mut self) -> Result<()> {
         while let Some(event) = self.ready.try_recv() {
             self.authority.update_ready_event(&event);
@@ -157,22 +120,23 @@ impl<A: SimulatedActuator> ActuatorChannel<A> {
             // retained motor command is still live.  Drain and park before
             // the next Webots step; the step loop surfaces the latched clock
             // fault as a controller failure.
-            self.commands.take_all_observed()?;
+            drop(self.drain_commands());
             self.authority.clear();
-            return self.device.park();
+            return self.device.stop();
         };
-        admit_pending(&mut self.authority, self.commands.take_all_observed()?);
+        let pending = self.drain_commands();
+        admit_pending(&mut self.authority, pending);
         match self.authority.live_host(host_now) {
-            Some(command) => self.device.apply_body(command.clone()),
-            None => self.device.park(),
+            Some(command) => self.device.apply(command),
+            None => self.device.stop(),
         }
     }
 
     fn park(&mut self) -> Result<()> {
         // Whatever the graph sent that the stopped loop will never apply goes
         // with it; leaving it queued would apply it to a later world.
-        self.commands.take_all_observed()?;
-        self.device.park()
+        drop(self.drain_commands());
+        self.device.stop()
     }
 }
 
@@ -318,7 +282,7 @@ pub(crate) struct CapabilityChannel {
 /// The device and handle behind one capability, statically typed by the family
 /// it belongs to.
 enum CapabilityBinding {
-    Motor(ActuatorChannel<NativeMotor>),
+    Motor(MotorChannel),
     Encoder(SensorChannel<NativeEncoder>),
     Imu(SensorChannel<NativeImu>),
     Accelerometer(SensorChannel<NativeAccelerometer>),
@@ -355,7 +319,7 @@ impl CapabilityChannel {
         let binding = match spec {
             CapabilitySpec::Motor(spec) => {
                 let drive = ParticipantId::new(MOTOR_COMMAND_AUTHORITY)?;
-                CapabilityBinding::Motor(ActuatorChannel {
+                CapabilityBinding::Motor(MotorChannel {
                     device: NativeMotor::new(webots, spec)?,
                     commands: SetpointReceiver::new(bus, &component()?.motor(id)?.command())
                         .await?,

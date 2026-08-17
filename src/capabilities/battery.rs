@@ -114,7 +114,7 @@ impl SimulatedSensor for NativeBattery {
             if !self.reported_absent {
                 self.reported_absent = true;
                 tracing::warn!(
-                    target: "simulator_webots_controller",
+                    target: crate::LOG_TARGET,
                     capability = %self.spec.sampled.reference,
                     "this world's Robot node declares no `battery` field, so the battery \
                      capability publishes nothing; add [energy, max_energy, recharge] to the \
@@ -140,7 +140,7 @@ mod tests {
                 reference: "pack.battery"
                     .parse()
                     .expect("a valid capability reference"),
-                schedule: SampleSchedule::new("pack.battery", 100.0, 100.0)
+                schedule: SampleSchedule::from_source_period_ns("pack.battery", 10_000_000, 100.0)
                     .expect("a valid publish rate"),
                 sampling_period_ms: 100,
             },

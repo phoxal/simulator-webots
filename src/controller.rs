@@ -7,11 +7,12 @@
 //! `manifest.json`, learns its execution from the router, opens an external bus
 //! session, mints one opaque timeline, and runs the external Webots step loop.
 //!
-//! Every capability kind a component may declare is simulated except one:
-//! Webots has no button, switch, or toggle node, so nothing in a simulated
-//! world can engage or release an `emergency_stop`. That capability is
-//! deliberately left unpublished rather than driven from a static config,
-//! which would assert a state no one in the world can change.
+//! Three capability kinds are not simulated. Webots has no button, switch, or
+//! toggle node, so nothing in a simulated world can engage or release an
+//! `emergency_stop`: it is deliberately left unpublished rather than driven
+//! from a static config, which would assert a state no one in the world can
+//! change. `led` and `speaker` are refused outright at startup, because no
+//! participant owns those effects in the current graph.
 
 use std::path::Path;
 
@@ -21,6 +22,8 @@ use phoxal_bus::{
     BusConfig, BusOwner, ParticipantId, ParticipantReadyToken, SourceLabel, TimelineAuthority,
     TimelineId, WorldClockPublisher, WorldStepToken,
 };
+use phoxal_model::Robot;
+use phoxal_model::identity::ComponentInstanceId;
 use phoxal_protocol::runtime::endpoint::simulation::ClockEndpoint;
 use phoxal_protocol::runtime::simulation::Clock;
 
@@ -83,20 +86,24 @@ pub(crate) async fn run(bundle_root: &Path, connect: &str) -> Result<()> {
     // handle together, so the two are never matched up by position later.
     let mut channels = Vec::with_capacity(catalog.specs().len());
     for spec in catalog.specs() {
-        channels.push(CapabilityChannel::bind(&bus, handle.webots(), spec).await?);
+        channels.push(
+            CapabilityChannel::bind(&bus, handle.webots(), spec)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to bind the {} capability {} the bundle manifest declares",
+                        spec.kind().as_str(),
+                        spec.reference()
+                    )
+                })?,
+        );
     }
 
     // Presence is declared only once every channel is bound: a driver that
     // reads as present must already be able to serve its contracts.
-    //
-    // One token per simulated component instance, and none for the controller
-    // itself. The supervisor watches presence per participant id and derives
-    // the expected set from the manifest, where a driver's participant id IS
-    // its component instance id; this process stands in for all of them, and it
-    // is not itself an expected runtime.
     let mut presence: Vec<ParticipantReadyToken> = Vec::new();
-    for component in robot.components() {
-        let participant = ParticipantId::new(component.id().as_str())?;
+    for participant in presented_participants(robot) {
+        let participant = ParticipantId::new(participant.as_str())?;
         presence.push(
             owner
                 .declare_participant_ready_as(&participant)
@@ -110,7 +117,7 @@ pub(crate) async fn run(bundle_root: &Path, connect: &str) -> Result<()> {
         %execution,
         robot = %robot.id(),
         capabilities = ?catalog.kind_counts(),
-        components = presence.len(),
+        presented = presence.len(),
         "webots controller ready"
     );
 
@@ -150,6 +157,28 @@ pub(crate) async fn run(bundle_root: &Path, connect: &str) -> Result<()> {
     outcome.and(parked)
 }
 
+/// The component instances this controller stands in for, in the robot's
+/// canonical instance order.
+///
+/// Exactly the instances that declare a `driver` block, which is the same
+/// derivation every launcher applies to decide which driver processes a real
+/// robot starts. A component without a driver block has no process on a real
+/// robot either, so nothing expects it to be present and nothing here declares
+/// it: presenting one would put a participant id on the bus that the supervisor
+/// never asked about, and a simulated robot would read as *more* complete than
+/// the same robot on hardware.
+///
+/// The controller itself is never in this set. The supervisor watches presence
+/// per participant id and a driver's participant id IS its component instance
+/// id; this one process stands in for all of them and is not itself an expected
+/// runtime.
+fn presented_participants(robot: &Robot) -> impl Iterator<Item = &ComponentInstanceId> {
+    robot
+        .components()
+        .filter(|component| component.instance().driver().is_some())
+        .map(|component| component.id())
+}
+
 /// The execution this controller joins, learned from the router it connects to.
 ///
 /// The execution id is not in argv and never will be: a router's Zenoh session
@@ -180,8 +209,54 @@ mod tests {
     use super::*;
     use crate::channel::PendingPublish;
     use phoxal_bus::{ExecutionId, RobotInstant, SamplePublisher, SampleReceiver, StreamReceiver};
+    use phoxal_model::RobotBuilder;
     use phoxal_protocol::robot as api;
     use std::time::Duration;
+
+    /// A robot whose `wheel` instance is driven by a component driver and whose
+    /// `bumper` instance is not.
+    ///
+    /// The builder states everything except the driver block, which no
+    /// in-memory constructor exposes, so the block is written into the same
+    /// persisted document a bundle carries and read back through the model's own
+    /// validating deserializer.
+    fn robot_with_one_driven_component() -> Robot {
+        let robot = RobotBuilder::new("presence-rover")
+            .component_type("wheel_drive", |wheel| wheel.motor("motor", "axle"))
+            .component_type("bumper_pad", |bumper| bumper.range("range", "bumper_link"))
+            .component("wheel", "wheel_drive")
+            .component("bumper", "bumper_pad")
+            .build()
+            .expect("the presence model must build");
+
+        let mut document = serde_json::to_value(&robot).expect("a robot must serialize");
+        document["components"]["wheel"]["driver"] =
+            serde_json::json!({ "connection": { "type": "can", "bus": 0, "node_id": 1 } });
+        serde_json::from_value(document).expect("the patched manifest must still validate")
+    }
+
+    /// Ruling: the presented set is exactly the manifest's driver set, which is
+    /// what the supervisor expects. A component with no driver block runs no
+    /// process on a real robot, so a simulated one declares no presence for it
+    /// either.
+    #[test]
+    fn only_components_with_a_driver_block_are_presented() {
+        let robot = robot_with_one_driven_component();
+        assert_eq!(
+            robot
+                .components()
+                .map(|component| component.id().as_str())
+                .collect::<Vec<_>>(),
+            ["bumper", "wheel"],
+            "both components stay mounted, bound and simulated"
+        );
+        assert_eq!(
+            presented_participants(&robot)
+                .map(ComponentInstanceId::as_str)
+                .collect::<Vec<_>>(),
+            ["wheel"]
+        );
+    }
 
     /// One process may mint exactly one timeline authority, so the commit
     /// path's behaviour is covered by this single test rather than one per
