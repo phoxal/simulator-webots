@@ -5,7 +5,7 @@ name = "phoxal-simulator-webots-controller"
 # index is append-only, so a fresh 0.1.x would have to be written before those
 # records and the publication is refused. The train and this version are
 # independent from here on.
-version = "0.63.0"
+version = "0.63.1"
 edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-only"
