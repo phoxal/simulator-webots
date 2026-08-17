@@ -1,11 +1,11 @@
 //! One capability's Webots device bound to the bus handle that serves it.
 //!
 //! Binding the device and its handle into one record is what keeps them from
-//! being re-paired by position on every step: a produced sample already
-//! carries the publisher it belongs to, and a queued command already sits next
-//! to the device it drives. The controller holds one `Vec<CapabilityChannel>`
-//! in the robot's canonical capability order, so there is exactly one sequence
-//! to keep straight instead of sixteen parallel ones.
+//! being re-paired by position on every step: a sample is published on the
+//! handle it was just read through, in the same call, and a queued command
+//! already sits next to the device it drives. The controller holds one
+//! `Vec<CapabilityChannel>` in the robot's canonical capability order, so there
+//! is exactly one sequence to keep straight instead of sixteen parallel ones.
 
 use anyhow::Result;
 use phoxal_bus::{
@@ -60,20 +60,15 @@ where
         self.device.reset(logical_time_ns)
     }
 
-    /// Read this step's sample, if there is one, and queue it for publishing
-    /// on this channel's own handle.
+    /// Read this step's sample, if there is one, and publish it on this
+    /// channel's own handle.
     ///
-    /// `wrap` is the family's [`PendingPublish`] constructor. The queue is one
-    /// sequence over every family, so a queued body has to say which contract
-    /// it belongs to; it does that by construction rather than by a lookup.
-    fn read_into(
-        &mut self,
-        step: SensorStep,
-        wrap: fn(SamplePublisher<S::Endpoint>, S::Sample) -> PendingPublish,
-        pending: &mut Vec<PendingPublish>,
-    ) -> Result<()> {
+    /// The read and the publish are one act, on the one handle the sample
+    /// belongs to, so no body ever exists apart from the publisher that serves
+    /// it and no step allocates a queue to hold it.
+    fn publish_due(&mut self, step: SensorStep, captured_at: CaptureStamp) -> Result<()> {
         if let Some(sample) = self.device.read_if_due(step)? {
-            pending.push(wrap(self.publisher.clone(), sample));
+            self.publisher.publish(captured_at, sample)?;
         }
         Ok(())
     }
@@ -164,112 +159,6 @@ fn admit_pending<B>(authority: &mut FixedSourceLease<B>, pending: Vec<Observed<B
 struct BatteryChannel {
     device: NativeBattery,
     publisher: StatePublisher<api::endpoint::component::battery::StateEndpoint>,
-}
-
-/// One body a completed world advance produced, carrying the handle it
-/// publishes on.
-pub(crate) enum PendingPublish {
-    Encoder(
-        SamplePublisher<api::endpoint::component::encoder::SampleEndpoint>,
-        api::component::encoder::Sample,
-    ),
-    Imu(
-        SamplePublisher<api::endpoint::component::imu::SampleEndpoint>,
-        api::component::imu::Sample,
-    ),
-    Accelerometer(
-        SamplePublisher<api::endpoint::component::accelerometer::SampleEndpoint>,
-        api::component::accelerometer::Sample,
-    ),
-    Gyroscope(
-        SamplePublisher<api::endpoint::component::gyroscope::SampleEndpoint>,
-        api::component::gyroscope::Sample,
-    ),
-    Range(
-        SamplePublisher<api::endpoint::component::range::SampleEndpoint>,
-        api::component::range::Sample,
-    ),
-    Camera(
-        SamplePublisher<api::endpoint::component::camera::FrameEndpoint>,
-        api::component::camera::Frame,
-    ),
-    Depth(
-        SamplePublisher<api::endpoint::component::depth::FrameEndpoint>,
-        api::component::depth::Frame,
-    ),
-    Gnss(
-        SamplePublisher<api::endpoint::component::gnss::SampleEndpoint>,
-        api::component::gnss::Sample,
-    ),
-    Magnetometer(
-        SamplePublisher<api::endpoint::component::magnetometer::SampleEndpoint>,
-        api::component::magnetometer::Sample,
-    ),
-    Lidar(
-        SamplePublisher<api::endpoint::component::lidar::ScanEndpoint>,
-        api::component::lidar::Scan,
-    ),
-    Mmwave(
-        SamplePublisher<api::endpoint::component::mmwave::ScanEndpoint>,
-        api::component::mmwave::Scan,
-    ),
-    Microphone(
-        SamplePublisher<api::endpoint::component::microphone::FrameEndpoint>,
-        api::component::microphone::Frame,
-    ),
-    Battery(
-        StatePublisher<api::endpoint::component::battery::StateEndpoint>,
-        api::component::battery::State,
-    ),
-}
-
-impl PendingPublish {
-    /// Publish the body on the handle it was produced with.
-    ///
-    /// Simulated sensors read the world at exactly the instant the world
-    /// advanced to, so their capture is exact rather than uncertain. A battery
-    /// reports what the pack is, not what a sensor saw at an instant, so it is
-    /// state stamped with the world step like the clock itself.
-    fn publish(self, captured_at: CaptureStamp, world_step: &WorldStepToken) -> Result<()> {
-        match self {
-            Self::Encoder(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Imu(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Accelerometer(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Gyroscope(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Range(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Camera(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Depth(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Gnss(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Magnetometer(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Lidar(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Mmwave(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Microphone(publisher, body) => publisher.publish(captured_at, body)?,
-            Self::Battery(publisher, body) => publisher.publish(world_step, body)?,
-        }
-        Ok(())
-    }
-}
-
-/// Everything one completed world advance produced, in the order the
-/// controller's capabilities are bound.
-pub(crate) struct StepOutput {
-    pending: Vec<PendingPublish>,
-}
-
-impl StepOutput {
-    /// The bodies one advance produced, in binding order.
-    pub(crate) const fn new(pending: Vec<PendingPublish>) -> Self {
-        Self { pending }
-    }
-
-    /// Publish every body this advance produced, each on its own handle.
-    pub(crate) fn publish(self, world_step: &WorldStepToken) -> Result<()> {
-        let captured_at = CaptureStamp::exact(world_step.instant());
-        for pending in self.pending {
-            pending.publish(captured_at, world_step)?;
-        }
-        Ok(())
-    }
 }
 
 /// One bound capability: the reference it was declared under, and the device
@@ -471,63 +360,40 @@ impl CapabilityChannel {
         }
     }
 
-    /// Queue this capability's reading for `step`, when the step is one it
-    /// publishes on. Actuators produce nothing.
-    fn read_into(&mut self, step: SensorStep, pending: &mut Vec<PendingPublish>) -> Result<()> {
+    /// Read this capability for `step` and publish what it produced, when the
+    /// step is one it publishes on. Actuators produce nothing.
+    ///
+    /// Simulated sensors read the world at exactly the instant it advanced to,
+    /// so their capture is exact rather than uncertain. A battery reports what
+    /// the pack is, not what a sensor saw at an instant, so it is state stamped
+    /// with the world step like the clock itself.
+    pub(crate) fn publish_due(
+        &mut self,
+        step: SensorStep,
+        world_step: &WorldStepToken,
+    ) -> Result<()> {
+        let captured_at = CaptureStamp::exact(world_step.instant());
         match &mut self.binding {
-            CapabilityBinding::Encoder(channel) => {
-                channel.read_into(step, PendingPublish::Encoder, pending)
-            }
-            CapabilityBinding::Imu(channel) => {
-                channel.read_into(step, PendingPublish::Imu, pending)
-            }
-            CapabilityBinding::Accelerometer(channel) => {
-                channel.read_into(step, PendingPublish::Accelerometer, pending)
-            }
-            CapabilityBinding::Gyroscope(channel) => {
-                channel.read_into(step, PendingPublish::Gyroscope, pending)
-            }
-            CapabilityBinding::Range(channel) => {
-                channel.read_into(step, PendingPublish::Range, pending)
-            }
-            CapabilityBinding::Camera(channel) => {
-                channel.read_into(step, PendingPublish::Camera, pending)
-            }
-            CapabilityBinding::Depth(channel) => {
-                channel.read_into(step, PendingPublish::Depth, pending)
-            }
-            CapabilityBinding::Gnss(channel) => {
-                channel.read_into(step, PendingPublish::Gnss, pending)
-            }
-            CapabilityBinding::Magnetometer(channel) => {
-                channel.read_into(step, PendingPublish::Magnetometer, pending)
-            }
-            CapabilityBinding::Lidar(channel) => {
-                channel.read_into(step, PendingPublish::Lidar, pending)
-            }
-            CapabilityBinding::Mmwave(channel) => {
-                channel.read_into(step, PendingPublish::Mmwave, pending)
-            }
-            CapabilityBinding::Microphone(channel) => {
-                channel.read_into(step, PendingPublish::Microphone, pending)
-            }
+            CapabilityBinding::Encoder(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Imu(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Accelerometer(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Gyroscope(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Range(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Camera(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Depth(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Gnss(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Magnetometer(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Lidar(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Mmwave(channel) => channel.publish_due(step, captured_at),
+            CapabilityBinding::Microphone(channel) => channel.publish_due(step, captured_at),
             CapabilityBinding::Battery(channel) => {
                 if let Some(state) = channel.device.read_if_due(step)? {
-                    pending.push(PendingPublish::Battery(channel.publisher.clone(), state));
+                    channel.publisher.publish(world_step, state)?;
                 }
                 Ok(())
             }
             CapabilityBinding::Motor(_) => Ok(()),
         }
-    }
-
-    /// Read every channel for `step` into one publish queue.
-    pub(crate) fn read_all(channels: &mut [Self], step: SensorStep) -> Result<StepOutput> {
-        let mut pending = Vec::new();
-        for channel in channels {
-            channel.read_into(step, &mut pending)?;
-        }
-        Ok(StepOutput::new(pending))
     }
 }
 

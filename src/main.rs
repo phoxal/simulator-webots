@@ -74,8 +74,9 @@ struct Cli {
 }
 
 /// Multi-thread: Zenoh refuses to run on Tokio's current-thread scheduler, and
-/// every Webots call blocks, so the step loop lives on a blocking worker while
-/// the transport keeps running.
+/// the Webots step loop runs on its own dedicated OS thread outside the
+/// runtime, so the transport has to keep draining while that thread is blocked
+/// inside Webots.
 #[tokio::main]
 async fn main() -> ExitCode {
     // Parse first: help, version, and misuse all end the process without ever

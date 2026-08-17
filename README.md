@@ -19,10 +19,10 @@ describes a supervised participant this process is not.
 3. Learns its execution from the router at `--connect`.
    A router's session id **is** the execution, so the id is never an argument;
    an endpoint reporting zero or several executions is refused.
-4. Opens one external bus session and binds every capability of every component
-   instance to its Webots device: sensors publish samples, the battery publishes
-   state, and motors subscribe setpoints under `phoxal-bus`'s fixed-source
-   authority, which admits `drive` and nobody else.
+4. Opens one external bus session and binds every capability it simulates, on
+   every component instance, to its Webots device: sensors publish samples, the
+   battery publishes state, and motors subscribe setpoints under `phoxal-bus`'s
+   fixed-source authority, which admits `drive` and nobody else.
 5. Declares one liveliness Ready token **per component instance that declares a
    `driver` block**, and none for itself.
    That is the same set every launcher derives to decide which driver processes
@@ -37,6 +37,9 @@ describes a supervised participant this process is not.
    it on `runtime/simulation/clock`.
    The order is the contract - a reader that has seen a step's clock has already
    seen that step's outputs.
+   The loop is one dedicated thread that owns the world outright, so every
+   Webots call comes from the thread that opened the devices and a reading is
+   published on its own handle where it was read.
 
 Three of the capability kinds a component may declare are not simulated:
 
