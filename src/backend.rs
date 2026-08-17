@@ -3,23 +3,19 @@
 //! This crate never opens a `webots_rs::Supervisor`: a controller drives its
 //! own robot's devices and nothing else in the world.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-
 use anyhow::{Context, Result, bail};
+use phoxal_bus::WorldStepToken;
 
 use crate::capabilities::SensorStep;
-use crate::channel::{CapabilityChannel, StepOutput};
+use crate::channel::CapabilityChannel;
+use crate::runtime::StepWorld;
 
 /// What one turn of the Webots step loop produced.
 pub(crate) enum Advance {
-    /// The world advanced one step, reaching `time_ns`, and produced `output`.
-    /// `rewound` reports that this instant precedes the previous one, which is
-    /// Webots starting a new world history rather than continuing this one.
-    Stepped {
-        time_ns: u64,
-        output: StepOutput,
-        rewound: bool,
-    },
+    /// The world advanced one step, reaching `time_ns`. `rewound` reports that
+    /// this instant precedes the previous one, which is Webots starting a new
+    /// world history rather than continuing this one.
+    Stepped { time_ns: u64, rewound: bool },
     /// Webots asked this controller to shut down - the world was reverted,
     /// reloaded, or quit. That is how a simulation ends, not how one fails, so
     /// it is a value here rather than an error.
@@ -75,6 +71,10 @@ impl WebotsHandle {
 }
 
 /// The world, its step length, and every capability bound to it.
+///
+/// One dedicated OS thread owns this for the life of the process, so every
+/// Webots call is made from the thread that opened the devices and a step
+/// publishes what it read without handing anything back across a task boundary.
 pub(crate) struct WebotsBackend {
     webots: webots_rs::Webots,
     step_ms: i32,
@@ -82,15 +82,15 @@ pub(crate) struct WebotsBackend {
     channels: Vec<CapabilityChannel>,
 }
 
-impl WebotsBackend {
-    /// Apply the graph's inputs, advance the world one step, and read every
-    /// capability that publishes on the step just completed.
+impl StepWorld for WebotsBackend {
+    /// Apply the graph's inputs and advance the world one step.
     ///
     /// # Errors
     ///
-    /// Returns an error when a device rejects a command or a reading. Webots
-    /// asking the controller to shut down is [`Advance::Stopped`], not an
-    /// error: a reverted or quit world ends the simulation normally.
+    /// Returns an error when a device rejects a command or Webots reports an
+    /// unusable clock. Webots asking the controller to shut down is
+    /// [`Advance::Stopped`], not an error: a reverted or quit world ends the
+    /// simulation normally.
     fn advance(&mut self) -> Result<Advance> {
         for channel in &mut self.channels {
             channel.apply_backlog()?;
@@ -105,13 +105,17 @@ impl WebotsBackend {
                 channel.reset(time_ns)?;
             }
         }
-        let output = CapabilityChannel::read_all(&mut self.channels, SensorStep { time_ns })?;
         self.last_time_ns = Some(time_ns);
-        Ok(Advance::Stepped {
-            time_ns,
-            output,
-            rewound,
-        })
+        Ok(Advance::Stepped { time_ns, rewound })
+    }
+
+    /// Read every capability that publishes on the step just completed and
+    /// publish it, each on its own handle, in the robot's binding order.
+    fn publish_due(&mut self, step: SensorStep, world_step: &WorldStepToken) -> Result<()> {
+        for channel in &mut self.channels {
+            channel.publish_due(step, world_step)?;
+        }
+        Ok(())
     }
 
     /// Leave the world quiet: every motor stopped and every speaker silent.
@@ -134,50 +138,6 @@ impl WebotsBackend {
             }
         }
         first_error.map_or(Ok(()), Err)
-    }
-}
-
-/// The world shared between the step loop and shutdown.
-///
-/// Both reach it from async code, and every operation on it blocks on Webots,
-/// so each one runs on a blocking worker rather than on the runtime's threads.
-#[derive(Clone)]
-pub(crate) struct SharedBackend(Arc<Mutex<WebotsBackend>>);
-
-impl SharedBackend {
-    pub(crate) fn new(backend: WebotsBackend) -> Self {
-        Self(Arc::new(Mutex::new(backend)))
-    }
-
-    /// A poisoned lock means another thread panicked while holding it. The
-    /// world is still there and the devices are still bound, so the guard is
-    /// recovered rather than refused: declining to act here would leave the
-    /// motors running.
-    fn lock(&self) -> MutexGuard<'_, WebotsBackend> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Advance the world one step, returning the instant it reached and
-    /// everything that step produced.
-    ///
-    /// Sensor publish cadence is measured against Webots' actual logical clock
-    /// instant for the step just completed.
-    pub(crate) async fn advance(&self) -> Result<Advance> {
-        let backend = self.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut world = backend.lock();
-            world.advance()
-        })
-        .await
-        .context("Webots step worker failed to join")?
-    }
-
-    /// Leave the world quiet.
-    pub(crate) async fn park(&self) -> Result<()> {
-        let backend = self.clone();
-        tokio::task::spawn_blocking(move || backend.lock().park())
-            .await
-            .context("Webots parking worker failed to join")?
     }
 }
 

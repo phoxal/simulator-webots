@@ -122,6 +122,12 @@ impl NativeMotor {
         }
         Ok(())
     }
+
+    /// Leave the motor quiet: a simulation that stopped, or a step with no live
+    /// authorised command, must not keep the wheel turning.
+    pub(crate) fn stop(&self) -> Result<()> {
+        self.apply(&api::component::motor::Command::Stop)
+    }
 }
 
 fn dispatch(

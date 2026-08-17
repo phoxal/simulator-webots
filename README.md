@@ -19,28 +19,40 @@ describes a supervised participant this process is not.
 3. Learns its execution from the router at `--connect`.
    A router's session id **is** the execution, so the id is never an argument;
    an endpoint reporting zero or several executions is refused.
-4. Opens one external bus session and binds every capability of every component
-   instance to its Webots device: sensors publish samples, the battery publishes
-   state, and motors subscribe setpoints under `phoxal-bus`'s fixed-source
-   authority, which admits `drive` and nobody else.
-5. Declares one liveliness Ready token **per component instance it simulates**,
-   and none for itself.
-   The supervisor watches presence per participant id and a driver's participant
-   id is its component instance id, so this one process standing in for every
-   driver is what makes a simulated robot read as complete.
+4. Opens one external bus session and binds every capability it simulates, on
+   every component instance, to its Webots device: sensors publish samples, the
+   battery publishes state, and motors subscribe setpoints under `phoxal-bus`'s
+   fixed-source authority, which admits `drive` and nobody else.
+5. Declares one liveliness Ready token **per component instance that declares a
+   `driver` block**, and none for itself.
+   That is the same set every launcher derives to decide which driver processes
+   a real robot starts, and the set the supervisor expects: a driver's
+   participant id is its component instance id, so this one process standing in
+   for every driver is what makes a simulated robot read as complete.
+   A component without a `driver` block runs no process on hardware either, so
+   it is neither expected nor presented - it is still bound and simulated like
+   any other.
 6. Runs the Webots step loop: apply inputs, advance the world one step, publish
    everything that step produced, then publish the `Clock { step }` that closes
    it on `runtime/simulation/clock`.
    The order is the contract - a reader that has seen a step's clock has already
    seen that step's outputs.
+   The loop is one dedicated thread that owns the world outright, so every
+   Webots call comes from the thread that opened the devices and a reading is
+   published on its own handle where it was read.
 
-Every capability kind a component may declare is simulated except `emergency_stop`:
-Webots has no button, switch or toggle node, so nothing in a simulated world
-could engage or release one, and asserting a state nobody can change would be
-worse than publishing nothing.
-`led` and `speaker` effects are refused at startup, because no participant owns
-them in the current graph and applying them from any source would turn arrival
-order into authority.
+Three of the capability kinds a component may declare are not simulated:
+
+- `emergency_stop` is skipped and left unpublished. Webots has no button,
+  switch or toggle node, so nothing in a simulated world could engage or release
+  one, and asserting a state nobody can change would be worse than publishing
+  nothing.
+- `led` and `speaker` are refused at startup - the controller exits rather than
+  running the world - because no participant owns those effects in the current
+  graph, and applying them from any source would turn arrival order into
+  authority.
+
+Every other kind is simulated.
 
 ## Running it
 
@@ -61,10 +73,11 @@ Webots also stops it with `SIGTERM`; on that signal - or `SIGINT` - the
 controller parks the world, drops its presence tokens, closes the bus session,
 and exits 0.
 
-Logging goes to stderr, which Webots collects into its console.
-`RUST_LOG` sets the filter; the default is `info,phoxal.lease=warn`, because the
-bus lease traces one line per motor command per motor and would otherwise bury
-everything else. Raise them with `RUST_LOG=info,phoxal.lease=info`.
+Logging goes to stderr, which Webots collects into its console (the CLI routes
+it into the session's Webots log). `RUST_LOG` sets the filter; the default is
+`info,zenoh=warn,zenoh_link_unixsock_stream=error`, the same as the supervisor.
+The controller is an external entity: it never publishes to the supervisor's
+log stream.
 
 ## Building it
 

@@ -74,8 +74,9 @@ struct Cli {
 }
 
 /// Multi-thread: Zenoh refuses to run on Tokio's current-thread scheduler, and
-/// every Webots call blocks, so the step loop lives on a blocking worker while
-/// the transport keeps running.
+/// the Webots step loop runs on its own dedicated OS thread outside the
+/// runtime, so the transport has to keep draining while that thread is blocked
+/// inside Webots.
 #[tokio::main]
 async fn main() -> ExitCode {
     // Parse first: help, version, and misuse all end the process without ever
@@ -95,14 +96,12 @@ async fn main() -> ExitCode {
 }
 
 fn init_tracing() {
-    // `phoxal.lease` traces every fixed-source authority decision at INFO, one
-    // line per motor command per motor - around ninety lines a second on a
-    // four-wheel rover at 25 Hz, which buries everything else this process
-    // says. The decisions still matter when a motor is not moving, so they are
-    // kept and lowered rather than dropped: raise them back with
-    // `RUST_LOG=info,phoxal.lease=info`.
+    // The same defaults as the supervisor: `RUST_LOG` decides, otherwise this
+    // process at `info` and the transport at `warn`. `zenoh_link_unixsock_stream`
+    // warns on every successful client connect over a Unix socket (the client
+    // side has no named local address), so it is held to errors.
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,phoxal.lease=warn"));
+        .unwrap_or_else(|_| EnvFilter::new("info,zenoh=warn,zenoh_link_unixsock_stream=error"));
     // Webots pipes a controller's stderr into its console when it launches one,
     // and that pipe renders no escape codes; a controller started by hand at a
     // terminal gets colour.
