@@ -30,15 +30,9 @@ use crate::capabilities::SensorStep;
 /// `WebotsBackend` exists only inside a live Webots controller process, while
 /// what this loop guarantees - every output of a step published before the
 /// clock that closes it, and a parked world however the loop stops - is exactly
-/// what has to stay coverable without one. There is a single production
-/// implementation.
-///
-/// That cover is currently owed rather than held: the loop's other half is a
-/// [`WorldTime`], which only a connected [`SimulatorSession`] can hand out, and
-/// the `simulator` profile offers no session that opens without a live router.
-/// The seam stays because the test comes straight back the moment it does.
-///
-/// [`SimulatorSession`]: phoxal::simulator::SimulatorSession
+/// what has to stay covered without one. There is a single production
+/// implementation, and the tests below drive this seam against a real
+/// simulator session.
 pub(crate) trait StepWorld {
     /// Apply the graph's inputs and advance the world one step.
     fn advance(&mut self) -> Result<Advance>;
@@ -156,5 +150,233 @@ impl<W: StepWorld> ControllerRuntime<W> {
             "external Webots step committed"
         );
         Ok(ControlFlow::Continue(()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phoxal::api;
+    use phoxal::bus::{CaptureStamp, RobotInstant, SamplePublisher, StepStamp};
+    use phoxal::identity::TimelineId;
+    use phoxal::model::identity::{CapabilityId, ComponentInstanceId};
+    use phoxal::simulator::SimulatorSession;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    /// The same diagnostic label the controller attaches with.
+    const LABEL: &str = "webots-controller";
+
+    /// A world scripted advance by advance, standing in for the Webots one.
+    ///
+    /// It publishes one encoder sample per step on a real handle taken from a
+    /// real session, so what the loop commits is admitted by the transport the
+    /// controller actually uses rather than recorded by a stub.
+    struct ScriptedWorld {
+        advances: VecDeque<Result<Advance>>,
+        encoder: SamplePublisher<api::component::encoder::Sample>,
+        /// The instant of every step whose outputs went out, in publish order.
+        published_at: Arc<Mutex<Vec<RobotInstant>>>,
+        /// Set once a step has published, standing in for a signal arriving
+        /// while the loop is mid-step.
+        stop_after_publish: Option<Arc<AtomicBool>>,
+        /// Refuse this step's outputs, standing in for a device that failed
+        /// halfway through a commit.
+        refuse_outputs: bool,
+        /// Observed after the runtime that owns this world has been consumed.
+        parked: Arc<AtomicBool>,
+    }
+
+    impl StepWorld for ScriptedWorld {
+        fn advance(&mut self) -> Result<Advance> {
+            self.advances.pop_front().unwrap_or(Ok(Advance::Stopped))
+        }
+
+        fn publish_due(&mut self, step: SensorStep, world_step: &WorldStepToken) -> Result<()> {
+            if self.refuse_outputs {
+                anyhow::bail!("a capability refused this step's outputs");
+            }
+            self.encoder.publish(
+                CaptureStamp::exact(world_step.instant()),
+                api::component::encoder::Sample::try_new(step.time_ns as f64, 0.5)?,
+            )?;
+            self.published_at
+                .lock()
+                .expect("the publish record is uncontended")
+                .push(world_step.instant());
+            if let Some(stop) = &self.stop_after_publish {
+                stop.store(true, Ordering::Release);
+            }
+            Ok(())
+        }
+
+        fn park(&mut self) -> Result<()> {
+            self.parked.store(true, Ordering::Release);
+            Ok(())
+        }
+    }
+
+    /// What one scripted run ended as, read after the runtime - and with it
+    /// this process's one world time - has been dropped.
+    struct Scenario {
+        outcome: Result<()>,
+        parked: bool,
+        timeline: TimelineId,
+        published_at: Vec<RobotInstant>,
+    }
+
+    /// Run one scripted world to completion against its own simulator session.
+    ///
+    /// The session is opened the way an adapter opens one, minus the router:
+    /// the world time under test comes from `take_world_time`, exactly as it
+    /// does in `controller::run`.
+    async fn run_scenario(
+        advances: Vec<Result<Advance>>,
+        stop: &Arc<AtomicBool>,
+        stop_after_publish: Option<Arc<AtomicBool>>,
+        refuse_outputs: bool,
+    ) -> Scenario {
+        let mut session = SimulatorSession::in_process(LABEL)
+            .await
+            .expect("the in-process simulator session opens");
+        let component = ComponentInstanceId::new("left_drive").expect("a valid component instance");
+        let capability = CapabilityId::new("encoder").expect("a valid capability id");
+        let encoder = session
+            .sample_publisher(
+                api::topics()
+                    .component(&component)
+                    .expect("a concrete component segment")
+                    .encoder(&capability)
+                    .expect("a concrete capability segment")
+                    .sample()
+                    .owner(),
+            )
+            .expect("the encoder publisher attaches");
+        let world_time = session.take_world_time().expect("world time is available");
+        let timeline = world_time.timeline();
+
+        let parked = Arc::new(AtomicBool::new(false));
+        let published_at = Arc::new(Mutex::new(Vec::new()));
+        let world = ScriptedWorld {
+            advances: advances.into_iter().collect(),
+            encoder,
+            published_at: Arc::clone(&published_at),
+            stop_after_publish,
+            refuse_outputs,
+            parked: Arc::clone(&parked),
+        };
+
+        // `run` consumes the runtime, so the world time - and this process's one
+        // timeline authority with it - is released before the next scenario
+        // opens its session.
+        let outcome = ControllerRuntime::new(world_time, world, Arc::clone(stop)).run();
+        session.close().await;
+
+        Scenario {
+            outcome,
+            parked: parked.load(Ordering::Acquire),
+            timeline,
+            published_at: published_at
+                .lock()
+                .expect("the publish record is uncontended")
+                .clone(),
+        }
+    }
+
+    /// One completed advance, stopped after it.
+    fn one_step() -> Vec<Result<Advance>> {
+        vec![Ok(Advance::Stepped {
+            time_ns: 20_000_000,
+            rewound: false,
+        })]
+    }
+
+    /// One process may mint exactly one world time, so every way the loop can
+    /// stop is covered by this single test, each scenario closing its session -
+    /// and with it the authority - before the next one opens. The session is
+    /// the one an adapter really attaches with, minus the router, so a step's
+    /// outputs are admitted by the transport the controller actually uses.
+    ///
+    /// What this proves is the parking discipline and the step stamping: every
+    /// way the loop can stop leaves the world quiet, a device failure is
+    /// reported rather than swallowed, and the outputs of an advance carry that
+    /// advance's exact instant on this process's own timeline.
+    ///
+    /// What it deliberately does **not** claim is the enqueue order - a step's
+    /// outputs reaching the outbound lane before the clock that closes it. That
+    /// needs both sequence numbers read back from the client side, and the
+    /// `simulator` profile hands an adapter owner-side handles only, by design.
+    /// The framework proves it in `phoxal/src/simulator/world_session_tests.rs`,
+    /// over the same transport, with a real subscriber on each key. Asserting it
+    /// from here without that subscriber only looks like a proof: swapping the
+    /// two publishes in `step_once` leaves every assertion below passing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn every_stop_parks_the_world_and_a_step_stamps_its_outputs_with_its_own_instant() {
+        // Webots quits the world after one step: the step is committed, and the
+        // world is quiet before the loop returns.
+        let stopped =
+            run_scenario(one_step(), &Arc::new(AtomicBool::new(false)), None, false).await;
+        assert!(stopped.outcome.is_ok(), "a quit world is not a failure");
+        assert!(stopped.parked, "a stopped world must be left quiet");
+        assert_eq!(
+            stopped.published_at,
+            vec![RobotInstant::new(stopped.timeline, 20_000_000)],
+            "a step's outputs carry the instant the world advanced to, on the \
+             timeline this process owns"
+        );
+
+        // A device that fails halfway through a commit is reported, and the
+        // world is quiet all the same.
+        let refused = run_scenario(one_step(), &Arc::new(AtomicBool::new(false)), None, true).await;
+        assert_eq!(
+            refused
+                .outcome
+                .expect_err("a refused output must reach the caller")
+                .to_string(),
+            "a capability refused this step's outputs"
+        );
+        assert!(
+            refused.parked,
+            "a world that failed mid-commit must still be left quiet"
+        );
+
+        // A host signal stops the loop at the next step boundary, before the
+        // second scripted advance, and that world is left quiet too.
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut signalled_advances = one_step();
+        signalled_advances.push(Err(anyhow::anyhow!(
+            "the loop must never reach this advance"
+        )));
+        let signalled =
+            run_scenario(signalled_advances, &stop, Some(Arc::clone(&stop)), false).await;
+        assert!(
+            signalled.outcome.is_ok(),
+            "a requested stop is not a failure"
+        );
+        assert!(signalled.parked, "a signalled world must be left quiet");
+        assert_eq!(
+            signalled.published_at,
+            vec![RobotInstant::new(signalled.timeline, 20_000_000)],
+            "the stop took effect at the step boundary, so only the first \
+             advance ever published"
+        );
+
+        // A failing world is reported, and parked first: a motor left running
+        // is worse than an error nobody sees.
+        let failed = run_scenario(
+            vec![Err(anyhow::anyhow!("device rejected a command"))],
+            &Arc::new(AtomicBool::new(false)),
+            None,
+            false,
+        )
+        .await;
+        assert_eq!(
+            failed
+                .outcome
+                .expect_err("a device failure must reach the caller")
+                .to_string(),
+            "device rejected a command"
+        );
+        assert!(failed.parked, "a failed world must still be left quiet");
     }
 }
