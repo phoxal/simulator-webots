@@ -1848,42 +1848,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "phoxal-bundle"
-version = "0.65.0"
+name = "phoxal"
+version = "0.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29f6a69fca65f77e2beeb9ef8bf9edd79f2f4346f5db1bd3261ac972001a5938"
+checksum = "510e2dbd84c97a43884d3f01bd476db815455a315931909d88a7c9e5cae1e0e4"
 dependencies = [
- "phoxal-model",
- "phoxal-runtime-contract",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "phoxal-bus"
-version = "0.65.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85ebc1eacf0cb3742c23c93bb21cb51250b36982028810bc134f7437462b4d3b"
-dependencies = [
+ "anyhow",
+ "clap",
+ "const_format",
  "getrandom 0.3.4",
  "libc",
  "phoxal-macros",
- "phoxal-runtime-contract",
  "rmp-serde",
+ "schemars 1.2.2",
  "serde",
+ "serde_bytes",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "zenoh",
 ]
 
 [[package]]
 name = "phoxal-macros"
-version = "0.65.0"
+version = "0.66.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a355ac6605ee6a10d1ceaa9745858c0b7eeb9b819cd05662fe74dfb2808e9da8"
+checksum = "b787e1f7fb43345032ef463510f330451a185bdbdda10b8a6a0266cbc6dcb99a"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -1893,58 +1885,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "phoxal-model"
-version = "0.65.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "885f2c11c84c197718e40c145345e6e4d70c0ec587e560d9fcd4545254dd0709"
-dependencies = [
- "phoxal-macros",
- "phoxal-runtime-contract",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "phoxal-protocol"
-version = "0.65.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e3902bc4d04d005a8bb3e0104334996e5aafbe4625d63f0287b7cfb52834aa5"
-dependencies = [
- "phoxal-bus",
- "phoxal-macros",
- "phoxal-model",
- "phoxal-runtime-contract",
- "serde",
- "serde_bytes",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "phoxal-runtime-contract"
-version = "0.65.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53f6444242eac2fe7a3b1c73412462c1acff919604545039908629c6bca5af44"
-dependencies = [
- "const_format",
- "getrandom 0.3.4",
- "libc",
- "serde",
- "serde_bytes",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "phoxal-simulator-webots-controller"
 version = "0.63.1"
 dependencies = [
  "anyhow",
  "clap",
- "phoxal-bundle",
- "phoxal-bus",
- "phoxal-model",
- "phoxal-protocol",
+ "phoxal",
  "serde_json",
  "tokio",
  "tracing",
@@ -2090,9 +2036,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.16"
+version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560"
+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
 dependencies = [
  "bytes",
  "fastbloom",
@@ -2230,18 +2176,18 @@ dependencies = [
 
 [[package]]
 name = "ref-cast"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "216e8f773d7923bcba9ceb86a86c93cabb3903a11872fc3f138c49630e50b96d"
+checksum = "7e440fb4e4b4147295338efb76001ab9e4efc0e5839df2c47fc5ac2381d365c3"
 dependencies = [
  "ref-cast-impl",
 ]
 
 [[package]]
 name = "ref-cast-impl"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c9283685feec7d69af75fb0e858d5e7378f33fe4fc699383b2916ab9273e03c"
+checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4340,9 +4286,9 @@ dependencies = [
 
 [[package]]
 name = "zerovec-derive"
-version = "0.11.4"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47402523226a02bfe5230160dc3ccc089aa6f6f19e7fcbb4e6f824bbb1b4aa62"
+checksum = "9f212a141d820099d57ffafb9569be9617a6f27d3dc881fbee8fb56642f917a9"
 dependencies = [
  "proc-macro2",
  "quote",
