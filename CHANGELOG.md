@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.64.0](https://github.com/phoxal/simulator-webots/compare/v0.63.1...v0.64.0) - 2026-08-19
+
+### Added
+
+- [**breaking**] cut the controller over to `phoxal` and `SimulatorSession` ([#7](https://github.com/phoxal/simulator-webots/pull/7))
+
 ## [0.63.1](https://github.com/phoxal/simulator-webots/compare/v0.63.0...v0.63.1) - 2026-08-17
 
 ### Added
