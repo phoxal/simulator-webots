@@ -2,7 +2,7 @@
 //! the Webots `Accelerometer` device, which reports proper acceleration in the
 //! sensor's own frame.
 
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::vector_sensor;
 
@@ -11,6 +11,5 @@ vector_sensor!(
     webots_rs::device::accelerometer::Accelerometer,
     accelerometer,
     api::component::accelerometer::Sample,
-    api::endpoint::component::accelerometer::SampleEndpoint,
     linear_acceleration,
 );

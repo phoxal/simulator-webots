@@ -23,19 +23,16 @@ name = "phoxal-simulator-webots-controller"
 path = "src/main.rs"
 
 [dependencies]
-# The controller is a plain bus client, not a participant: it depends on the
-# transport, the contract catalogue, the robot model and the bundle reader, and
-# deliberately not on the `phoxal` facade, whose runner, roles and setup context
-# describe a supervised participant this process is not.
+# One framework library, taken at its external-simulator profile. `phoxal` is
+# the whole framework train: the api trees, the typed bus vocabulary, the robot
+# model and the bundle reader are its modules, not separate packages.
 #
-# `phoxal-runtime-contract` is deliberately absent: the runtime identities this
-# binary names (`ParticipantId`, `ExecutionId`, `TimelineId`) appear in
-# `phoxal-bus`'s own signatures and are re-exported from it, so naming the
-# owning crate a second time would add a direct dependency that buys nothing.
-phoxal-bus = "0.65"
-phoxal-protocol = "0.65"
-phoxal-model = "0.65"
-phoxal-bundle = "0.65"
+# `simulator` rather than the default: this process owns a world and stands in
+# for a robot's component drivers, so what it needs is
+# `phoxal::simulator::SimulatorSession`. The participant profile - runner, role
+# attributes, setup context - describes a supervised participant this process is
+# not, and `default-features = false` is what keeps it off this binary.
+phoxal = { version = "0.66", default-features = false, features = ["simulator"] }
 webots-rs = "0.2"
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }

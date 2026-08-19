@@ -8,9 +8,9 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail};
-use phoxal_model::Robot;
-use phoxal_model::component::capability::{Capability, CapabilityKind};
-use phoxal_model::identity::CapabilityRef;
+use phoxal::model::Robot;
+use phoxal::model::component::capability::{Capability, CapabilityKind};
+use phoxal::model::identity::CapabilityRef;
 
 use crate::capabilities::SampledSpec;
 use crate::capabilities::battery::BatterySpec;
@@ -305,8 +305,8 @@ impl CapabilityCatalog {
 
 #[cfg(test)]
 mod tests {
-    use phoxal_model::builder::RobotBuilder;
-    use phoxal_model::simulation;
+    use phoxal::model::builder::RobotBuilder;
+    use phoxal::model::simulation;
 
     use super::CapabilityCatalog;
 

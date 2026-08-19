@@ -6,7 +6,7 @@
 //! resolved here; elevation is zero because a Webots radar target carries none.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 use webots_rs::device::radar::RadarTarget;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
@@ -29,9 +29,8 @@ impl NativeMmwave {
 
 impl SimulatedSensor for NativeMmwave {
     type Sample = api::component::mmwave::Scan;
-    type Endpoint = api::endpoint::component::mmwave::ScanEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.schedule
     }
 

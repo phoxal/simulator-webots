@@ -7,8 +7,8 @@
 //! authored numbers instead would let a scan describe a sensor nobody built.
 
 use anyhow::Result;
-use phoxal_model::component::capability::LidarOutput;
-use phoxal_protocol::robot as api;
+use phoxal::api;
+use phoxal::model::component::capability::LidarOutput;
 use webots_rs::device::lidar::{LidarConfig, LidarReading};
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
@@ -50,9 +50,8 @@ impl NativeLidar {
 
 impl SimulatedSensor for NativeLidar {
     type Sample = api::component::lidar::Scan;
-    type Endpoint = api::endpoint::component::lidar::ScanEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.sampled.schedule
     }
 

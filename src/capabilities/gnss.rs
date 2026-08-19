@@ -6,7 +6,7 @@
 //! here would describe an uncertainty nobody measured.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -28,9 +28,8 @@ impl NativeGnss {
 
 impl SimulatedSensor for NativeGnss {
     type Sample = api::component::gnss::Sample;
-    type Endpoint = api::endpoint::component::gnss::SampleEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.schedule
     }
 

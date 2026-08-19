@@ -6,8 +6,8 @@
 //! luminance happens here rather than in every consumer.
 
 use anyhow::Result;
-use phoxal_model::component::capability::CameraMode;
-use phoxal_protocol::robot as api;
+use phoxal::api;
+use phoxal::model::component::capability::CameraMode;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -37,9 +37,8 @@ impl NativeCamera {
 
 impl SimulatedSensor for NativeCamera {
     type Sample = api::component::camera::Frame;
-    type Endpoint = api::endpoint::component::camera::FrameEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.sampled.schedule
     }
 

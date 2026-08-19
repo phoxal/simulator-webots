@@ -3,11 +3,18 @@
 The Phoxal Webots controller: the process Webots runs for a simulated robot,
 which puts that robot's components on the Phoxal bus.
 
-It is a **plain bus client, not a Phoxal participant**.
+It is an **external simulator host, not a Phoxal participant**.
 There is no runner, no role attribute and no setup context.
-It depends on `phoxal-bus`, `phoxal-protocol`, `phoxal-model` and
-`phoxal-bundle`, and deliberately not on the `phoxal` facade, whose machinery
-describes a supervised participant this process is not.
+It depends on one framework library, `phoxal`, at its `simulator` profile only:
+
+```toml
+phoxal = { version = "0.66", default-features = false, features = ["simulator"] }
+```
+
+That profile is `phoxal::simulator::SimulatorSession` - typed component IO,
+delegated presence and the world's own time - and deliberately not the default
+participant profile, whose runner, role attributes and setup context describe a
+supervised participant this process is not.
 
 ## What it does
 
@@ -19,11 +26,13 @@ describes a supervised participant this process is not.
 3. Learns its execution from the router at `--connect`.
    A router's session id **is** the execution, so the id is never an argument;
    an endpoint reporting zero or several executions is refused.
-4. Opens one external bus session and binds every capability it simulates, on
+4. Opens one `SimulatorSession` and binds every capability it simulates, on
    every component instance, to its Webots device: sensors publish samples, the
-   battery publishes state, and motors subscribe setpoints under `phoxal-bus`'s
+   battery publishes state, and motors subscribe setpoints under the framework's
    fixed-source authority, which admits `drive` and nobody else.
-5. Declares one liveliness Ready token **per component instance that declares a
+   Every handle is taken on the endpoint's **owner** side, because a simulator
+   is the owner of every capability it stands in for.
+5. Declares one delegated Ready lease **per component instance that declares a
    `driver` block**, and none for itself.
    That is the same set every launcher derives to decide which driver processes
    a real robot starts, and the set the supervisor expects: a driver's
@@ -40,6 +49,8 @@ describes a supervised participant this process is not.
    The loop is one dedicated thread that owns the world outright, so every
    Webots call comes from the thread that opened the devices and a reading is
    published on its own handle where it was read.
+   The session's `WorldTime` - this process's one timeline authority and the
+   clock hand that closes a step - is taken once and moves onto that thread.
 
 Three of the capability kinds a component may declare are not simulated:
 
@@ -70,8 +81,8 @@ You do not normally run it yourself.
 `webots/controllers/<name>/<name>` from the CLI's materialisation cache, and
 Webots launches it with those arguments through the robot's `controllerArgs`.
 Webots also stops it with `SIGTERM`; on that signal - or `SIGINT` - the
-controller parks the world, drops its presence tokens, closes the bus session,
-and exits 0.
+controller parks the world, then closes its session, which drops the presence it
+stood in with before it lets go of the transport, and exits 0.
 
 Logging goes to stderr, which Webots collects into its console (the CLI routes
 it into the session's Webots log). `RUST_LOG` sets the filter; the default is

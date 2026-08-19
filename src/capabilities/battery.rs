@@ -14,7 +14,7 @@
 //! curve invented here would describe no simulated hardware.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -87,9 +87,8 @@ impl NativeBattery {
 
 impl SimulatedSensor for NativeBattery {
     type Sample = api::component::battery::State;
-    type Endpoint = api::endpoint::component::battery::StateEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.sampled.schedule
     }
 
@@ -132,7 +131,7 @@ impl SimulatedSensor for NativeBattery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sample_schedule::SampleSchedule;
+    use phoxal::SampleSchedule;
 
     fn spec() -> BatterySpec {
         BatterySpec {
