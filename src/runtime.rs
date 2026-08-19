@@ -270,7 +270,10 @@ mod tests {
         // timeline authority with it - is released before the next scenario
         // opens its session.
         let outcome = ControllerRuntime::new(world_time, world, Arc::clone(stop)).run();
-        session.close().await;
+        session
+            .close()
+            .await
+            .expect("the in-process simulator session closes cleanly");
 
         Scenario {
             outcome,

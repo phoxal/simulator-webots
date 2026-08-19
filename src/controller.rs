@@ -144,13 +144,26 @@ pub(crate) async fn run(bundle_root: &Path, connect: &str) -> Result<()> {
     // Only then does this process close the session, which drops the presence
     // it was standing in for and then the transport - closing while the wheels
     // were still turning would let a reader believe the drivers are already
-    // gone.
+    // gone. The close happens whatever the thread did, a panic included: the
+    // presence must not outlive the world on any exit path, and the transport's
+    // own close evidence is reported beside the loop's outcome rather than
+    // being skipped by an early return.
     let outcome = step_loop
         .join()
-        .map_err(|_| anyhow!("the Webots step loop thread panicked"))?;
-    session.close().await;
+        .map_err(|_| anyhow!("the Webots step loop thread panicked"));
+    let closed = session
+        .close()
+        .await
+        .context("failed to close the simulator session cleanly");
 
-    outcome
+    match (outcome, closed) {
+        (Ok(Ok(())), Ok(())) => Ok(()),
+        (Ok(Ok(())), Err(close)) => Err(close),
+        (Ok(Err(world)), Ok(())) | (Err(world), Ok(())) => Err(world),
+        (Ok(Err(world)), Err(close)) | (Err(world), Err(close)) => {
+            Err(world.context(format!("and then: {close:#}")))
+        }
+    }
 }
 
 /// The component instances this controller stands in for, in the robot's
