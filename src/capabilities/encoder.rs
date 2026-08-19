@@ -6,7 +6,7 @@
 //! declared gear ratio.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -36,9 +36,8 @@ impl NativeEncoder {
 
 impl SimulatedSensor for NativeEncoder {
     type Sample = api::component::encoder::Sample;
-    type Endpoint = api::endpoint::component::encoder::SampleEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.sampled.schedule
     }
 

@@ -6,7 +6,7 @@
 //! the naming a simulated component must use for its IMU to bind at all.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -36,9 +36,8 @@ impl NativeImu {
 
 impl SimulatedSensor for NativeImu {
     type Sample = api::component::imu::Sample;
-    type Endpoint = api::endpoint::component::imu::SampleEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.schedule
     }
 

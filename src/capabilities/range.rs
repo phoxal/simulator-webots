@@ -3,7 +3,7 @@
 //! declares.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -32,9 +32,8 @@ impl NativeRange {
 
 impl SimulatedSensor for NativeRange {
     type Sample = api::component::range::Sample;
-    type Endpoint = api::endpoint::component::range::SampleEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.sampled.schedule
     }
 

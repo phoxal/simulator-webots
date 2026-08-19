@@ -4,7 +4,7 @@
 //! own robot's devices and nothing else in the world.
 
 use anyhow::{Context, Result, bail};
-use phoxal_bus::WorldStepToken;
+use phoxal::bus::WorldStepToken;
 
 use crate::capabilities::SensorStep;
 use crate::channel::CapabilityChannel;
@@ -26,8 +26,8 @@ pub(crate) enum Advance {
 ///
 /// Opening is separate from binding because a device can only be requested
 /// from an already-open handle, while the bus side of the same capability can
-/// only be attached from an open bus session. Both happen in one pass over the
-/// catalog, and this is the handle that pass borrows.
+/// only be attached from an open simulator session. Both happen in one pass
+/// over the catalog, and this is the handle that pass borrows.
 pub(crate) struct WebotsHandle {
     webots: webots_rs::Webots,
     step_ms: i32,

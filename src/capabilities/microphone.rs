@@ -3,7 +3,7 @@
 //! for the elapsed window, so the frame carries it through untouched.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -25,9 +25,8 @@ impl NativeMicrophone {
 
 impl SimulatedSensor for NativeMicrophone {
     type Sample = api::component::microphone::Frame;
-    type Endpoint = api::endpoint::component::microphone::FrameEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.schedule
     }
 

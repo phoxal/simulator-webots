@@ -8,13 +8,14 @@
 //! is exactly one sequence to keep straight instead of sixteen parallel ones.
 
 use anyhow::Result;
-use phoxal_bus::{
-    BusHandle, CaptureStamp, FixedSourceLease, LocalInstant, Observed, ParticipantId,
-    ParticipantReadyEvents, SampleContract, SamplePublisher, SetpointReceiver, StatePublisher,
-    StepStamp, WorldStepToken,
+use phoxal::api;
+use phoxal::bus::{
+    CaptureStamp, Endpoint, FixedSourceLease, LocalInstant, Observed, ParticipantReadyEvents,
+    RobotEndpoint, SamplePublisher, SetpointReceiver, StatePublisher, StepStamp, WorldStepToken,
 };
-use phoxal_model::identity::CapabilityRef;
-use phoxal_protocol::robot as api;
+use phoxal::identity::ParticipantId;
+use phoxal::model::identity::CapabilityRef;
+use phoxal::simulator::SimulatorSession;
 use std::time::Duration;
 
 use crate::capabilities::accelerometer::NativeAccelerometer;
@@ -38,23 +39,23 @@ const MOTOR_SOURCE_SILENCE: Duration = Duration::from_millis(150);
 
 /// The one participant allowed to command a simulated motor.
 ///
-/// The authority policy itself is `phoxal-bus`'s [`FixedSourceLease`], not
-/// anything this binary invents: leaving the facade behind changed how the
-/// receiver is built, not who may drive the wheels.
+/// The authority policy itself is the framework's [`FixedSourceLease`], not
+/// anything this binary invents: the simulator SDK decides how the receiver is
+/// built, not who may drive the wheels.
 const MOTOR_COMMAND_AUTHORITY: &str = "drive";
 
 /// A sensor device and the measurement handle it publishes on.
 struct SensorChannel<S: SimulatedSensor>
 where
-    S::Endpoint: SampleContract<Payload = S::Sample>,
+    S::Sample: RobotEndpoint + Endpoint<Semantics = phoxal::bus::Sample>,
 {
     device: S,
-    publisher: SamplePublisher<S::Endpoint>,
+    publisher: SamplePublisher<S::Sample>,
 }
 
 impl<S: SimulatedSensor> SensorChannel<S>
 where
-    S::Endpoint: SampleContract<Payload = S::Sample>,
+    S::Sample: RobotEndpoint + Endpoint<Semantics = phoxal::bus::Sample>,
 {
     fn reset(&mut self, logical_time_ns: u64) -> Result<()> {
         self.device.reset(logical_time_ns)
@@ -84,7 +85,7 @@ where
 /// single implementation.
 struct MotorChannel {
     device: NativeMotor,
-    commands: SetpointReceiver<api::endpoint::component::motor::CommandEndpoint>,
+    commands: SetpointReceiver<api::component::motor::Command>,
     authority: FixedSourceLease<api::component::motor::Command>,
     ready: ParticipantReadyEvents,
 }
@@ -158,7 +159,7 @@ fn admit_pending<B>(authority: &mut FixedSourceLease<B>, pending: Vec<Observed<B
 /// rather than a measurement.
 struct BatteryChannel {
     device: NativeBattery,
-    publisher: StatePublisher<api::endpoint::component::battery::StateEndpoint>,
+    publisher: StatePublisher<api::component::battery::State>,
 }
 
 /// One bound capability: the reference it was declared under, and the device
@@ -191,26 +192,29 @@ impl CapabilityChannel {
     /// Open this capability's Webots device and attach the bus handle it is
     /// served on.
     ///
-    /// The handles are built straight from the session rather than through a
-    /// participant setup context: this process is an ordinary bus client, so
-    /// there is no runner holding a context for it and nothing between the
-    /// endpoint's topic builder and the handle that publishes on it.
+    /// The handles come from the simulator session rather than from a
+    /// participant setup context: this process is an external world host, so
+    /// there is no runner holding a context for it, and nothing between the
+    /// endpoint's own topic and the handle that serves it. Every one of them is
+    /// taken on the endpoint's **owner** side, because a simulator is the owner
+    /// of every capability it stands in for.
     pub(crate) async fn bind(
-        bus: &BusHandle,
+        session: &SimulatorSession,
         webots: &webots_rs::Webots,
         spec: &CapabilitySpec,
     ) -> Result<Self> {
         let reference = spec.reference().clone();
         // Every topic under this capability starts from the same component
         // segment; the leaf method is what names the contract.
-        let component = || api::topic::owner().component(&reference.component_id);
+        let component = || api::topics().component(&reference.component_id);
         let id = &reference.capability_id;
         let binding = match spec {
             CapabilitySpec::Motor(spec) => {
                 let drive = ParticipantId::new(MOTOR_COMMAND_AUTHORITY)?;
                 CapabilityBinding::Motor(MotorChannel {
                     device: NativeMotor::new(webots, spec)?,
-                    commands: SetpointReceiver::new(bus, &component()?.motor(id)?.command())
+                    commands: session
+                        .setpoint_receiver(component()?.motor(id)?.command().owner())
                         .await?,
                     authority: FixedSourceLease::new(
                         "component/motor/command",
@@ -218,74 +222,66 @@ impl CapabilityChannel {
                         MOTOR_SOURCE_SILENCE,
                         Duration::MAX,
                     ),
-                    ready: bus.participant_ready_events_for(&drive).await?,
+                    ready: session.participant_ready_events(&drive).await?,
                 })
             }
             CapabilitySpec::Encoder(spec) => CapabilityBinding::Encoder(SensorChannel {
                 device: NativeEncoder::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.encoder(id)?.sample())?,
+                publisher: session.sample_publisher(component()?.encoder(id)?.sample().owner())?,
             }),
             CapabilitySpec::Imu(spec) => CapabilityBinding::Imu(SensorChannel {
                 device: NativeImu::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.imu(id)?.sample())?,
+                publisher: session.sample_publisher(component()?.imu(id)?.sample().owner())?,
             }),
             CapabilitySpec::Accelerometer(spec) => {
                 CapabilityBinding::Accelerometer(SensorChannel {
                     device: NativeAccelerometer::new(webots, spec)?,
-                    publisher: SamplePublisher::new(
-                        bus.clone(),
-                        &component()?.accelerometer(id)?.sample(),
-                    )?,
+                    publisher: session
+                        .sample_publisher(component()?.accelerometer(id)?.sample().owner())?,
                 })
             }
             CapabilitySpec::Gyroscope(spec) => CapabilityBinding::Gyroscope(SensorChannel {
                 device: NativeGyroscope::new(webots, spec)?,
-                publisher: SamplePublisher::new(
-                    bus.clone(),
-                    &component()?.gyroscope(id)?.sample(),
-                )?,
+                publisher: session
+                    .sample_publisher(component()?.gyroscope(id)?.sample().owner())?,
             }),
             CapabilitySpec::Range(spec) => CapabilityBinding::Range(SensorChannel {
                 device: NativeRange::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.range(id)?.sample())?,
+                publisher: session.sample_publisher(component()?.range(id)?.sample().owner())?,
             }),
             CapabilitySpec::Camera(spec) => CapabilityBinding::Camera(SensorChannel {
                 device: NativeCamera::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.camera(id)?.frame())?,
+                publisher: session.sample_publisher(component()?.camera(id)?.frame().owner())?,
             }),
             CapabilitySpec::Depth(spec) => CapabilityBinding::Depth(SensorChannel {
                 device: NativeDepth::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.depth(id)?.frame())?,
+                publisher: session.sample_publisher(component()?.depth(id)?.frame().owner())?,
             }),
             CapabilitySpec::Gnss(spec) => CapabilityBinding::Gnss(SensorChannel {
                 device: NativeGnss::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.gnss(id)?.sample())?,
+                publisher: session.sample_publisher(component()?.gnss(id)?.sample().owner())?,
             }),
             CapabilitySpec::Magnetometer(spec) => CapabilityBinding::Magnetometer(SensorChannel {
                 device: NativeMagnetometer::new(webots, spec)?,
-                publisher: SamplePublisher::new(
-                    bus.clone(),
-                    &component()?.magnetometer(id)?.sample(),
-                )?,
+                publisher: session
+                    .sample_publisher(component()?.magnetometer(id)?.sample().owner())?,
             }),
             CapabilitySpec::Lidar(spec) => CapabilityBinding::Lidar(SensorChannel {
                 device: NativeLidar::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.lidar(id)?.scan())?,
+                publisher: session.sample_publisher(component()?.lidar(id)?.scan().owner())?,
             }),
             CapabilitySpec::Mmwave(spec) => CapabilityBinding::Mmwave(SensorChannel {
                 device: NativeMmwave::new(webots, spec)?,
-                publisher: SamplePublisher::new(bus.clone(), &component()?.mmwave(id)?.scan())?,
+                publisher: session.sample_publisher(component()?.mmwave(id)?.scan().owner())?,
             }),
             CapabilitySpec::Microphone(spec) => CapabilityBinding::Microphone(SensorChannel {
                 device: NativeMicrophone::new(webots, spec)?,
-                publisher: SamplePublisher::new(
-                    bus.clone(),
-                    &component()?.microphone(id)?.frame(),
-                )?,
+                publisher: session
+                    .sample_publisher(component()?.microphone(id)?.frame().owner())?,
             }),
             CapabilitySpec::Battery(spec) => CapabilityBinding::Battery(BatteryChannel {
                 device: NativeBattery::new(spec)?,
-                publisher: StatePublisher::new(bus.clone(), &component()?.battery(id)?.state())?,
+                publisher: session.state_publisher(component()?.battery(id)?.state().owner())?,
             }),
         };
         Ok(Self { reference, binding })
@@ -400,7 +396,7 @@ impl CapabilityChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phoxal_bus::{
+    use phoxal::bus::{
         BusMetadata, CodecId, ParticipantReadyStatus, ParticipantSourceIdentity, ProducerId,
         SourceAttribution,
     };

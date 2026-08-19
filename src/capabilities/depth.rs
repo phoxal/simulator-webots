@@ -7,7 +7,7 @@
 //! a plausible-looking distance.
 
 use anyhow::Result;
-use phoxal_protocol::robot as api;
+use phoxal::api;
 
 use super::{SampledSpec, SensorStep, SimulatedSensor};
 
@@ -36,9 +36,8 @@ impl NativeDepth {
 
 impl SimulatedSensor for NativeDepth {
     type Sample = api::component::depth::Frame;
-    type Endpoint = api::endpoint::component::depth::FrameEndpoint;
 
-    fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+    fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
         &mut self.spec.sampled.schedule
     }
 

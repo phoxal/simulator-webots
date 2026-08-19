@@ -7,9 +7,9 @@
 //! joint-side value Webots takes.
 
 use anyhow::Result;
-use phoxal_model::component::capability::MotorCommand;
-use phoxal_model::identity::CapabilityRef;
-use phoxal_protocol::robot as api;
+use phoxal::api;
+use phoxal::model::component::capability::MotorCommand;
+use phoxal::model::identity::CapabilityRef;
 use std::fmt;
 
 #[derive(Clone, Debug)]

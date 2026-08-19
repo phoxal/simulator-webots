@@ -22,10 +22,10 @@ pub(crate) mod mmwave;
 pub(crate) mod motor;
 pub(crate) mod range;
 
-use crate::sample_schedule::SampleSchedule;
 use anyhow::{Result, bail};
-use phoxal_model::identity::CapabilityRef;
-use phoxal_model::simulation;
+use phoxal::SampleSchedule;
+use phoxal::model::identity::CapabilityRef;
+use phoxal::model::simulation;
 
 /// The world instant one completed step advanced to.
 ///
@@ -43,10 +43,11 @@ pub(crate) struct SensorStep {
 /// declares a publish rate, the controller resolves it to a logical-time
 /// deadline schedule once at setup, and every family applies it the same way.
 pub(crate) trait SimulatedSensor {
-    /// The endpoint payload this device produces.
-    type Sample: phoxal_bus::Payload;
-    /// The endpoint carrying [`Self::Sample`].
-    type Endpoint: phoxal_bus::EndpointDescriptor<Payload = Self::Sample>;
+    /// The endpoint this device produces. A payload *is* its endpoint, so this
+    /// one associated type names both the body read from the device and the
+    /// contract it is published on; which side of that contract this process
+    /// takes is decided where the handle is built.
+    type Sample: phoxal::bus::Endpoint;
 
     /// The mutable publish cadence this capability was bound at.
     fn schedule(&mut self) -> &mut SampleSchedule;
@@ -208,7 +209,6 @@ macro_rules! vector_sensor {
         $device:ty,
         $accessor:ident,
         $sample:ty,
-        $endpoint:ty,
         $field:ident $(,)?
     ) => {
         pub(crate) struct $native {
@@ -232,9 +232,8 @@ macro_rules! vector_sensor {
 
         impl $crate::capabilities::SimulatedSensor for $native {
             type Sample = $sample;
-            type Endpoint = $endpoint;
 
-            fn schedule(&mut self) -> &mut crate::sample_schedule::SampleSchedule {
+            fn schedule(&mut self) -> &mut phoxal::SampleSchedule {
                 &mut self.spec.schedule
             }
 
@@ -258,8 +257,8 @@ pub(crate) use vector_sensor;
 #[cfg(test)]
 mod tests {
     use super::SampledSpec;
-    use phoxal_model::identity::CapabilityRef;
-    use phoxal_model::simulation;
+    use phoxal::model::identity::CapabilityRef;
+    use phoxal::model::simulation;
 
     #[test]
     fn webots_sampling_period_is_quantized_up_to_the_world_grid() {

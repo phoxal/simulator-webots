@@ -26,7 +26,6 @@ mod catalog;
 mod channel;
 mod controller;
 mod runtime;
-mod sample_schedule;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -44,11 +43,11 @@ const LONG_ABOUT: &str = "\
 phoxal-simulator-webots-controller - the Phoxal Webots controller
 
 Webots launches this process for the robot it is the controller of, passing
-these arguments through the robot's `controllerArgs`. It is a plain bus client,
-not a Phoxal participant: it reads the robot out of the bundle's manifest.json,
-connects to the supervisor's router, and simulates every component the robot
-mounts - publishing their samples, subscribing their setpoints, and publishing
-the authoritative world clock.
+these arguments through the robot's `controllerArgs`. It is an external
+simulator host, not a Phoxal participant: it reads the robot out of the bundle's
+manifest.json, attaches to the supervisor's execution, and simulates every
+component the robot mounts - publishing their samples, subscribing their
+setpoints, and publishing the authoritative world clock.
 
 The execution id is not an argument. A router's session id IS the execution, so
 this process asks the router at --connect rather than being told, and refuses to
