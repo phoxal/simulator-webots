@@ -2,7 +2,7 @@ target/
 .idea
 .env
 *.lock~
-.claude/worktrees
 .aider*
+/.codex/worktrees/
 
 .DS_Store
