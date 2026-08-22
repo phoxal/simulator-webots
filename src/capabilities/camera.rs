@@ -62,13 +62,17 @@ impl SimulatedSensor for NativeCamera {
 }
 
 fn bgra_to_rgb(bgra: &[u8]) -> Vec<u8> {
-    bgra.chunks_exact(4)
+    bgra.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|pixel| [pixel[2], pixel[1], pixel[0]])
         .collect()
 }
 
 fn bgra_to_luma(bgra: &[u8]) -> Vec<u8> {
-    bgra.chunks_exact(4)
+    bgra.as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| {
             let red = u32::from(pixel[2]);
             let green = u32::from(pixel[1]);
