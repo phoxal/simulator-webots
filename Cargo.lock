@@ -1886,7 +1886,7 @@ dependencies = [
 
 [[package]]
 name = "phoxal-simulator-webots-controller"
-version = "0.64.0"
+version = "0.64.1"
 dependencies = [
  "anyhow",
  "clap",

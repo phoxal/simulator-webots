@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.64.1](https://github.com/phoxal/simulator-webots/compare/v0.64.0...v0.64.1) - 2026-08-22
+
+### Other
+
+- use repository-local Codex worktrees ([#9](https://github.com/phoxal/simulator-webots/pull/9))
+
 ## [0.64.0](https://github.com/phoxal/simulator-webots/compare/v0.63.1...v0.64.0) - 2026-08-19
 
 ### Added
