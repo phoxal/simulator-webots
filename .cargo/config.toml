@@ -1,12 +1,3 @@
-# The static registry this package publishes to.
-#
-# Committed rather than passed per invocation because everything that touches
-# this repository needs it: release-plz aborts outright without it ("registry
-# index was not found in any configuration"), including inside the shared
-# reusable release-PR workflow, which does not inherit the caller's environment.
-[registries.phoxal]
-index = "sparse+https://phoxal.github.io/registry/"
-
 # Warnings are errors, here as well as in CI.
 #
 # CI denies them twice over: the clippy job passes `-D warnings`, and

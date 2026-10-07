@@ -1,18 +1,10 @@
 [package]
 name = "phoxal-simulator-webots-controller"
-# The first standalone release continues above the versions this package name
-# already published from the framework train (up to 0.62.1). The phoxal registry
-# index is append-only, so a fresh 0.1.x would have to be written before those
-# records and the publication is refused. The train and this version are
-# independent from here on.
 version = "0.64.0"
 edition = "2024"
 rust-version = "1.88"
 license = "AGPL-3.0-only"
-# Executables reach robots through the static `phoxal` registry, never
-# crates.io. Declaring the allowed registry in the manifest is the second,
-# independent guard: a plain `cargo publish` cannot reach crates.io by accident.
-publish = ["phoxal"]
+publish = false
 description = "Phoxal official simulator: Webots per-robot component-capability controller."
 documentation = "https://github.com/phoxal/simulator-webots#readme"
 homepage = "https://github.com/phoxal/simulator-webots"
